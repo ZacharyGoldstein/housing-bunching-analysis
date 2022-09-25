@@ -1,0 +1,11 @@
+*.csv
+*.zip
+*.pdf
+*.png
+*.jpg
+*.meta
+*.log
+*.geojson
+*.json
+*.ipynb_checkpoints/*
+
