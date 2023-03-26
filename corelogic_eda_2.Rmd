@@ -11,5 +11,81 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ```{r}
 library(tidyverse)
+library(magrittr)
+library(stringr)
+```
+
+# Combine ~150 files together
+
+```{r}
+hist_property_basics1_files = list.files("data/hist_property_basic1_01_20210728_180000_data/",pattern="*.csv")
+df_hpb1 = data.frame()
+for (file in hist_property_basics1_files){
+  file_path = str_glue("data/hist_property_basic1_01_20210728_180000_data/{file}")
+  data = read.csv(file_path)
+  df_hpb1 = rbind(df_hpb1,data)
+}
+dim(df_hpb1)
+head(df_hpb1)
+```
+```{r}
+df_hpb1 %<>% 
+  slice_tail(n=nrow(df_hpb1)-1) %>% 
+  mutate(YEAR.BUILT=as.numeric(YEAR.BUILT),
+         NUMBER.OF.BUILDINGS=as.numeric(NUMBER.OF.BUILDINGS),
+         EFFECTIVE.YEAR.BUILT=as.numeric(EFFECTIVE.YEAR.BUILT),
+         NUMBER.OF.UNITS=as.numeric(NUMBER.OF.UNITS))
+names(df_hpb1) = sapply(names(df_hpb1),FUN=\(x){str_replace_all(x,"\\.","_") %>% str_to_lower()})
+df_hpb1 %>% 
+  head()
+```
+```{r}
+#df_hpb1 %>% write.csv("data/corelogic_hpb1_mf.csv",row.names=F)
+```
+
+
+```{r}
+ggplot(df_hpb1 %>% 
+         filter(number_of_units<100,number_of_units>=5)) +
+  geom_histogram(aes(x=number_of_units),color='white',
+                 bins=95)
+```
+```{r}
+df_hpb1 %>% 
+  count(mailing_city,mailing_state,fips_code) %>% 
+  arrange(desc(n)) %>% 
+  head(20)
+```
+
+```{r}
+ggplot(df_hpb1 %>% filter(year_built>=1860)) +
+  geom_histogram(aes(x=year_built),color='white',
+                 bins=30)
+```
+```{r}
+ggplot(df_hpb1 %>% filter(effective_year_built>=1880)) +
+  geom_histogram(aes(x=effective_year_built),color='white',
+                 bins=30)
+```
+```{r}
+df_hpb1 %>% 
+  filter(mailing_city=='SAN FRANCISCO',mailing_state=='CA',number_of_units<=100,
+          year_built>=2016) %>% 
+  ggplot() +
+  geom_histogram(aes(x=number_of_units),color='white',bins=50) +
+  scale_x_continuous(n.breaks=20)
+```
+
+not great data in Portland OR
+```{r}
+df_hpb1 %>% 
+  filter(mailing_city=='PORTLAND',mailing_state=='OR',number_of_units<=100,
+          year_built>=2016) %>% 
+  ggplot() +
+  geom_histogram(aes(x=number_of_units),color='white',bins=50) +
+  scale_x_continuous(n.breaks=20)
+```
+```{r}
+
 ```
 
