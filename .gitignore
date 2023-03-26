@@ -1,6 +1,9 @@
 *.csv
 *.zip
 *.pdf
+*.doc
+*.docx
+*.pages
 *.png
 *.jpg
 *.meta

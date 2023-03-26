@@ -1,0 +1,15 @@
+---
+title: "CoreLogic Exploration 2"
+author: "Zachary Goldstein"
+date: "2023-03-26"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+```
+
