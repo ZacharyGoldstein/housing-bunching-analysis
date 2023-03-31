@@ -18,58 +18,62 @@ library(stringr)
 # Combine ~150 files together
 
 ```{r}
-hist_property_basics1_files = list.files("data/hist_property_basic1_01_20210728_180000_data/",pattern="*.csv")
-df_hpb1 = data.frame()
-for (file in hist_property_basics1_files){
-  file_path = str_glue("data/hist_property_basic1_01_20210728_180000_data/{file}")
+folder_path = "data/property_basic2_20210728_110001_data/"
+property_basics2_files = list.files(folder_path,pattern="*.csv")
+df_pb2_raw = data.frame()
+for (file in property_basics2_files){
+  file_path = str_glue("{folder_path}/{file}")
   data = read.csv(file_path)
-  df_hpb1 = rbind(df_hpb1,data)
+  df_pb2_raw = rbind(df_pb2_raw,data)
 }
-dim(df_hpb1)
-head(df_hpb1)
+dim(df_pb2_raw)
+head(df_pb2_raw)
 ```
+
 ```{r}
-df_hpb1 %<>% 
-  slice_tail(n=nrow(df_hpb1)-1) %>% 
-  mutate(YEAR.BUILT=as.numeric(YEAR.BUILT),
-         NUMBER.OF.BUILDINGS=as.numeric(NUMBER.OF.BUILDINGS),
-         EFFECTIVE.YEAR.BUILT=as.numeric(EFFECTIVE.YEAR.BUILT),
-         NUMBER.OF.UNITS=as.numeric(NUMBER.OF.UNITS))
-names(df_hpb1) = sapply(names(df_hpb1),FUN=\(x){str_replace_all(x,"\\.","_") %>% str_to_lower()})
-df_hpb1 %>% 
+df_pb2 = df_pb2_raw %>%  
+  slice_tail(n=nrow(df_pb2_raw)-1) %>% 
+  mutate(across(all_of(c("YEAR.BUILT","NUMBER.OF.BUILDINGS",
+                         "EFFECTIVE.YEAR.BUILT","NUMBER.OF.UNITS",
+                         "ACRES","LAND.SQUARE.FOOTAGE",
+                         "UNIVERSAL.BUILDING.SQUARE.FEET",
+                         "BUILDING.SQUARE.FEET")),as.numeric))
+names(df_pb2) = sapply(names(df_pb2),FUN=\(x){str_replace_all(x,"\\.","_") %>% str_to_lower()})
+df_pb2 %>% 
   head()
 ```
 ```{r}
-#df_hpb1 %>% write.csv("data/corelogic_hpb1_mf.csv",row.names=F)
+# MF = multi-family
+df_pb2 %>% write.csv("data/corelogic_pb2_mf.csv",row.names=F)
 ```
 
 
 ```{r}
-ggplot(df_hpb1 %>% 
+ggplot(df_pb2 %>% 
          filter(number_of_units<100,number_of_units>=5)) +
   geom_histogram(aes(x=number_of_units),color='white',
                  bins=95)
 ```
 ```{r}
-df_hpb1 %>% 
-  count(mailing_city,mailing_state,fips_code) %>% 
+df_pb2 %>% 
+  count(situs_city,situs_state,fips_code) %>% 
   arrange(desc(n)) %>% 
   head(20)
 ```
 
 ```{r}
-ggplot(df_hpb1 %>% filter(year_built>=1860)) +
+ggplot(df_pb2 %>% filter(year_built>=1860)) +
   geom_histogram(aes(x=year_built),color='white',
                  bins=30)
 ```
 ```{r}
-ggplot(df_hpb1 %>% filter(effective_year_built>=1880)) +
+ggplot(df_pb2 %>% filter(effective_year_built>=1880)) +
   geom_histogram(aes(x=effective_year_built),color='white',
                  bins=30)
 ```
 ```{r}
-df_hpb1 %>% 
-  filter(mailing_city=='SAN FRANCISCO',mailing_state=='CA',number_of_units<=100,
+df_pb2 %>% 
+  filter(situs_city=='SAN FRANCISCO',situs_state=='CA',number_of_units<=100,
           year_built>=2016) %>% 
   ggplot() +
   geom_histogram(aes(x=number_of_units),color='white',bins=50) +
@@ -78,8 +82,8 @@ df_hpb1 %>%
 
 not great data in Portland OR
 ```{r}
-df_hpb1 %>% 
-  filter(mailing_city=='PORTLAND',mailing_state=='OR',number_of_units<=100,
+df_pb2 %>% 
+  filter(situs_city=='PORTLAND',situs_state=='OR',number_of_units<=100,
           year_built>=2016) %>% 
   ggplot() +
   geom_histogram(aes(x=number_of_units),color='white',bins=50) +

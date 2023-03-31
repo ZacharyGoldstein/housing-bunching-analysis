@@ -1,0 +1,104 @@
+---
+title: "IZ Bunching Analysis"
+author: "Zachary Goldstein"
+date: "2023-03-31"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+rm(list=ls())
+library(tidyverse)
+library(readxl)
+```
+
+```{r}
+df_cl = read_csv("data/corelogic_pb2_mf.csv")
+dim(df_cl)
+head(df_cl)
+```
+```{r}
+df_iz_raw = read_excel("ih.org-inclusionary-database/Local Inclusionary Housing Policies.xlsx",
+                 sheet="data",skip=1)
+head(df_iz_raw)
+```
+```{r}
+df_iz = df_iz_raw %>% 
+  select(`Program ID`,`Program Name`,`Government Name`,`Government Type`,
+        state=`Government Address: State`,
+        `Year Program Adopted`,`Year Program Updated`,
+         `Program Applicable Areas`,`Minimum Project Size`,`Minimum Set-aside`,
+         `Incentive`) %>% 
+  rename_with(\(x){str_replace_all(x," ","_") %>% str_to_lower()}) %>% 
+  # Only keep policies with known thresholds (3 units or less doesn't count)
+  mutate(minimum_project_size = ifelse(minimum_project_size %in% c("Don't know","N/A","1 unit","2 units","3 units"),"missing",str_to_lower(minimum_project_size)),
+         government_name = str_replace(government_name,
+                "Town of |City of |City and County of|City Of |Town Of ","")) %>% 
+  filter(minimum_project_size!="missing")
+
+dim(df_iz)
+head(df_iz)
+```
+```{r}
+df_iz %<>% 
+  mutate(minimum_project_size=str_replace(minimum_project_size,"1 million","1000000") %>% 
+           str_replace(",",""),
+  threshold_cat=case_when(
+    str_detect(minimum_project_size,"^\\d+ units$") ~ "units",
+    str_detect(minimum_project_size,"^\\d+ acres \\(parcel\\)$") ~ "acres_parcel",
+    str_detect(minimum_project_size,"^\\d+ sqft \\(parcel\\)$") ~ "sqft_parcel",
+    str_detect(minimum_project_size,"^\\d+ sqft \\(building\\)$") ~ "sqft_building",
+    T ~ "other")) %>% 
+  filter(threshold_cat!='other') %>% 
+  mutate(threshold_num = str_extract(minimum_project_size, "[0-9]+\\.*[0-9]*") %>% 
+           as.numeric)
+df_iz %>% 
+  distinct(minimum_project_size,threshold_cat,threshold_num) %>% 
+  arrange(threshold_cat,minimum_project_size)
+```
+```{r}
+dim(df_iz)
+head(df_iz)
+```
+```{r}
+# Check for duplicates and missing values (linkage failures)
+df_merged = df_cl %>% 
+  full_join(df_iz %>% 
+              filter(government_type %in% c("Town or city","Special district")) %>% 
+              mutate(government_name=str_to_upper(government_name)),
+        by=c("situs_city"="government_name","situs_state"="state"),keep=T) %>% 
+  full_join(df_iz %>% 
+              filter(government_type %in% c("Consolidated city-county","County")) %>% 
+              mutate(government_name=str_to_upper(government_name)),
+            by=c("situs_county"="government_name","situs_state"="state"),keep=T)
+# Assert there are no properties that match to more than 1 IZ policy
+stopifnot(df_merged %>% filter(is.na(government_name.x)==F&is.na(government_name.y)==F) %>% nrow == 0)
+for (col in names(df_merged)){
+  if (str_endswith(col,".x")){
+    df_merged[,str_replace(col,".x","")] = coalesce(df_merged[,col],df_merged[,col])
+  }
+}
+df_merged %>% 
+  select(situs_city,situs_county,situs_state,government_name,government_type,state) %>% 
+  filter(is.na(government_name)==F) %>% 
+  distinct(situs_city,situs_county,situs_state,government_name,government_type,state) %>% 
+  slice_sample(n=20)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

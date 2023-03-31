@@ -13,3 +13,4 @@
 *.ipynb_checkpoints/*
 *.xlsx
 *-checkpoint.ipynb
+*.txt
