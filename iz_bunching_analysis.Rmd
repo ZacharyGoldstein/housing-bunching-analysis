@@ -13,7 +13,12 @@ knitr::opts_chunk$set(echo = TRUE)
 rm(list=ls())
 library(tidyverse)
 library(readxl)
+library(usdata)
+library(magrittr)
+options(dplyr.summarise.inform = FALSE)
 ```
+
+# Loading Data
 
 ```{r}
 df_cl = read_csv("data/corelogic_pb2_mf.csv")
@@ -25,6 +30,14 @@ df_iz_raw = read_excel("ih.org-inclusionary-database/Local Inclusionary Housing 
                  sheet="data",skip=1)
 head(df_iz_raw)
 ```
+# Cleaning and Processing Data
+
+```{r}
+df_pops = read_csv("https://raw.githubusercontent.com/plotly/datasets/master/us-cities-top-1k.csv") %>% 
+  mutate(state_code=state2abbr(State))
+head(df_pops)
+```
+
 ```{r}
 df_iz = df_iz_raw %>% 
   select(`Program ID`,`Program Name`,`Government Name`,`Government Type`,
@@ -36,8 +49,17 @@ df_iz = df_iz_raw %>%
   # Only keep policies with known thresholds (3 units or less doesn't count)
   mutate(minimum_project_size = ifelse(minimum_project_size %in% c("Don't know","N/A","1 unit","2 units","3 units"),"missing",str_to_lower(minimum_project_size)),
          government_name = str_replace(government_name,
-                "Town of |City of |City and County of|City Of |Town Of ","")) %>% 
-  filter(minimum_project_size!="missing")
+    "Town of |City of |City and County of |City Of |Town Of | Borough|Borough of ","") %>% 
+      str_replace("Newark City","Newark"),
+         state=str_replace(state,"D.C.","DC"),
+    # Manual override policy details based on research
+    # https://www.fbm.com/publications/what-you-need-to-know-about-san-franciscos-inclusionary-affordable-housing-program/
+    #minimum_project_size=ifelse(government_name=='San Francisco','25 units',minimum_project_size),
+    #year_program_adopted=ifelse(government_name=='San Francisco','2016',year_program_adopted)
+    ) %>% 
+  filter(minimum_project_size!="missing") %>% 
+  left_join(df_pops %>% select(City,state_code,city_pop=Population),
+            by=c("government_name"="City","state"="state_code"))
 
 dim(df_iz)
 head(df_iz)
@@ -60,27 +82,136 @@ df_iz %>%
   arrange(threshold_cat,minimum_project_size)
 ```
 ```{r}
+# Remove duplicate municipalities in IZ dataset
+df_iz %>% 
+  count(government_name,state) %>%
+  arrange(desc(n)) %>% 
+  head()
+
+# Need to come up with better way to pick among duplicates
+df_iz %<>% 
+  arrange(desc(threshold_num)) %>% 
+  distinct(government_name,state,.keep_all = T)
+```
+
+```{r}
 dim(df_iz)
 head(df_iz)
 ```
+Combine CoreLogic with other property datasets
+
+```{r}
+# Portland OR isn't in the non-historical CL at all so can easily combine without de-duping
+df_pd = read_csv("data/PDX_Residential_Building_Permits_20230328.csv",
+      col_select =c("STATUS","YEAR_","NEWCLASS","NEWTYPE","NEW_UNITS",
+                           "IS_ADU")) %>% 
+      filter(NEW_UNITS>=2,IS_ADU==F) %>% 
+      mutate(municipality_name="PORTLAND",
+             situs_city="PORTLAND",
+             situs_county="MULTNOMAH",
+             situs_state="OR",
+             number_of_buildings=1,
+             number_of_units=NEW_UNITS,
+             fips_code="41051",
+             year_built=YEAR_) %>% 
+      select(any_of(names(df_cl)))
+```
+
+```{r}
+max_year_cl_sd = df_cl %>% 
+                filter(situs_city=='SAN DIEGO',situs_state=='CA') %>% 
+                pull(year_built) %>% 
+                max(na.rm=T)
+df_sd_raw = read_csv("data/san_diego_parcels.csv",col_select = -SITUS_FRACTION,
+                     show_col_types=F)
+df_sd = df_sd_raw %>% 
+   mutate(municipality_name="SAN DIEGO",
+             situs_city="SAN DIEGO",
+             situs_county="SAN DIEGO",
+             situs_state="CA",
+            # situs_zip_code=SITUS_ZIP,
+             number_of_units=UNITQTY,
+             number_of_buildings=1,
+             fips_code="06073",
+             year_built=ifelse(as.numeric(YEAR_EFFECTIVE)<=23,
+                               2000+as.numeric(YEAR_EFFECTIVE),
+                               1900+as.numeric(YEAR_EFFECTIVE))) %>% 
+      select(any_of(names(df_cl))) %>% 
+      filter(number_of_units>=2,year_built>max_year_cl_sd)
+head(df_sd)
+```
+
+```{r}
+df_sf_raw = read_csv("data/sf_building_permits_20230404.csv",
+                     show_col_types=F,
+    col_select = c('Permit Type Definition','Description','Existing Use','Proposed Use',
+                              'Permit Creation Date',
+                             'Current Status',
+                              'Current Status Date',
+  'Filed Date','Issued Date','Completed Date','First Construction Document Date',
+                             'Existing Units','Proposed Units'))
+df_sf = df_sf_raw %>% 
+   mutate(municipality_name="SAN FRANCISCO",
+             situs_city="SAN FRANCISCO",
+             situs_county="SAN FRANCISCO",
+             situs_state="CA",
+             number_of_units=`Proposed Units`,
+             number_of_buildings=1,
+             fips_code="06075",
+          # Using filed date instead of year built because it makes more sense 
+          # based on expected IZ developer behavior
+             year_built=as.numeric(format(as.Date(`Filed Date`, format = "%m/%d/%Y"), format = "%Y"))) %>% 
+      select(any_of(names(df_cl))) %>%
+      filter(number_of_units>=2,year_built>max_year_cl_sf)
+head(df_sf)
+```
+
+```{r}
+# Exclude cities where I prefer to just use non-corelogic dataset to avoid dupes
+cities_to_exclude_from_cl = "SAN FRANCISCO"
+df_properties = df_cl %>% 
+  filter(situs_city %in% cities_to_exclude_from_cl == F) %>% 
+  bind_rows(df_pd) %>% 
+  bind_rows(df_sd) %>% 
+  bind_rows(df_sf)
+df_properties %>% 
+  tail()
+```
+
+
 ```{r}
 # Check for duplicates and missing values (linkage failures)
-df_merged = df_cl %>% 
+df_merged = df_properties %>% 
+  mutate(situs_city=coalesce(situs_city,municipality_name),
+         situs_county=str_replace(situs_county," COUNTY","")) %>% 
   full_join(df_iz %>% 
               filter(government_type %in% c("Town or city","Special district")) %>% 
               mutate(government_name=str_to_upper(government_name)),
         by=c("situs_city"="government_name","situs_state"="state"),keep=T) %>% 
   full_join(df_iz %>% 
               filter(government_type %in% c("Consolidated city-county","County")) %>% 
-              mutate(government_name=str_to_upper(government_name)),
-            by=c("situs_county"="government_name","situs_state"="state"),keep=T)
+              mutate(government_name=str_to_upper(government_name) %>% 
+                       str_replace("COUNTY OF ","") %>% 
+                       str_replace(" COUNTY","")),
+            by=c("situs_county"="government_name","situs_state"="state"),keep=T,suffix=c("_xcity","_ycounty"))
 # Assert there are no properties that match to more than 1 IZ policy
-stopifnot(df_merged %>% filter(is.na(government_name.x)==F&is.na(government_name.y)==F) %>% nrow == 0)
-for (col in names(df_merged)){
-  if (str_endswith(col,".x")){
-    df_merged[,str_replace(col,".x","")] = coalesce(df_merged[,col],df_merged[,col])
-  }
-}
+# Need to address edge cases here, like San Mateo County
+# stopifnot(df_merged %>% filter(is.na(government_name_xcity)==F&is.na(government_name_ycounty)==F) %>% nrow == 0)
+# df_merged %>% filter(is.na(government_name_xcity)==F&is.na(government_name_ycounty)==F) %>% 
+#   distinct(government_name_xcity,government_name_ycounty)
+
+# Coalesce cols together
+cols_to_coalesce = names(df_merged)
+for (i in seq_along(cols_to_coalesce)){
+  x_col_name = cols_to_coalesce[i]
+  if (str_ends(x_col_name,"_xcity")){
+    new_col_name = str_replace(x_col_name,"_xcity","")
+    y_col_name = str_replace(x_col_name,"_xcity","_ycounty")
+    df_merged = df_merged %>% 
+      mutate(!!new_col_name := coalesce(!!sym(x_col_name), !!sym(y_col_name)))
+  }}
+
+df_merged = df_merged %>% select(!contains("_xcity")&!contains("_ycounty"))
 df_merged %>% 
   select(situs_city,situs_county,situs_state,government_name,government_type,state) %>% 
   filter(is.na(government_name)==F) %>% 
@@ -88,17 +219,179 @@ df_merged %>%
   slice_sample(n=20)
 ```
 
+Check for IZ policies with missing property data
+
+Note: I looked for the top 10 missing IZ cities by city pop and didn't find in non-historical CL data
+```{r}
+df_missing = df_merged %>% 
+  filter(is.na(clip)) %>% 
+  distinct(government_name,government_type,state,city_pop) %>% 
+  arrange(desc(city_pop))
+df_missing %>% 
+  head(10)
+```
+
+```{r}
+df_cl %>% 
+  filter(str_detect(situs_city,"RICHMOND")) %>% 
+  distinct(situs_city,situs_county,situs_state) %>% 
+  head(10)
+```
 
 
+```{r}
+df_cl %>% filter(is.na(situs_city)) %>% count(municipality_name,situs_county,situs_state) %>% arrange(desc(n))
+```
 
 
+Handle San Mateo edge case
+```{r}
+df_merged %>% filter(str_detect(situs_county,"SAN MAT")) %>% 
+  select(situs_city,situs_county,situs_state,government_name) %>% 
+  distinct %>% 
+  head()
+```
 
 
+```{r}
+df_analysis = df_merged %>% 
+  mutate(bldg_year_combined=coalesce(effective_year_built,year_built),
+         bldg_sq_ft_combined = coalesce(universal_building_square_feet,building_square_feet)) %>% 
+  filter(is.na(bldg_year_combined)==F,is.na(threshold_cat)==F,number_of_buildings==1,
+         # Either date of adoption unknown, or the building was built after IZ adoption
+         (bldg_year_combined>=year_program_adopted|year_program_adopted=="Don't know")) %>% 
+  select(situs_city,situs_county,situs_state,government_type,
+        acres,land_square_footage,bldg_sq_ft_combined,
+        bldg_year_combined,number_of_units,number_of_buildings,
+        threshold_cat,threshold_num,year_program_adopted,year_program_updated)
+df_analysis %>% 
+  slice_sample(n=10)
+df_analysis %>% dim
+```
+
+```{r}
+df_analysis %>% 
+  count(situs_city,situs_county,situs_state,threshold_cat,threshold_num) %>% 
+  arrange(desc(n)) %>% 
+  head(10)
+```
+
+```{r}
+df_units = df_analysis %>% 
+  filter(threshold_cat=="units",threshold_num>=5) %>% 
+  mutate(rel_units=number_of_units-threshold_num)
+dim(df_units)
+df_units %>% head()
+```
+```{r}
+ggplot(df_units %>% filter(number_of_units<=50,threshold_num<=40,threshold_num>=10),
+       aes(x=rel_units)) +
+  geom_histogram(bins=150,color='white')
+```
+
+```{r}
+df_units %>% 
+  mutate(bunch_ind = as.numeric((threshold_num-number_of_units==1)|
+           (threshold_num-number_of_units==2)&(threshold_num %% 2 == 0)),
+         pre_bunch_ind = as.numeric((threshold_num-number_of_units==3)|
+           (threshold_num-number_of_units==2)&(threshold_num %% 2 == 1))) %>% 
+  group_by(situs_city,situs_state) %>% 
+  summarize(n_bunch_ind=sum(bunch_ind),
+            n_pre_bunch_ind = sum(pre_bunch_ind),
+            n_total=n(),
+            n_diff=n_bunch_ind-n_pre_bunch_ind) %>% 
+  arrange(desc(n_diff)) %>% 
+  head(10)
+```
+```{r}
+single_eda_plot = function(city,state,data=df_units){
+  data_filtered = df_units %>% filter(situs_city==city,situs_state==state,
+                      rel_units<=50,bldg_year_combined>=year_program_adopted)
+  n_bins = max(data_filtered$number_of_units)-min(data_filtered$number_of_units)
+  thresh = data_filtered$threshold_num %>% first
+ggplot(data_filtered,
+       aes(x=number_of_units)) +
+  geom_histogram(bins=n_bins,color='white') +
+  geom_vline(xintercept=thresh,color='red')
+}
+single_eda_plot(city="SAN FRANCISCO",state="CA")
+```
 
 
+```{r}
+sq_ft_per_acre = 43560
+df_parcel_area = df_analysis %>% 
+  filter(threshold_cat %in% c("acres_parcel","sqft_parcel")) %>% 
+  mutate(threshold_acres = ifelse(threshold_cat=='acres_parcel',threshold_num,
+                                  threshold_num/sq_ft_per_acre),
+         rel_acres = acres-threshold_acres)
+dim(df_parcel_area)
+df_parcel_area %>% 
+  head()
+```
+
+```{r}
+df_parcel_area %>% 
+  filter(acres<50) %>% 
+  ggplot(aes(x=rel_acres)) +
+  geom_histogram(color='white')
+```
+
+```{r}
+df_building_area = df_analysis %>% 
+  filter(threshold_cat=='sqft_building')
+df_building_area %>% 
+  head()
+```
 
 
+Promising candidates for single-city datasets
 
+Cities missing from CL completely
+```{r}
+df_merged %>% 
+  filter(is.na(clip),threshold_cat=="units",threshold_num>=6,city_pop>=100000) %>% 
+  select(government_name,state,city_pop) %>% 
+  arrange(desc(city_pop))
+```
+Cities missing recent data from CL (post-IZ adoption)
+```{r}
+cl_has_post_adoption = df_merged %>% 
+  filter(year_built>year_program_adopted,city_pop>100000,threshold_num>=6,
+         threshold_cat=="units") %>% 
+  distinct(situs_city,situs_state,city_pop) %>% 
+  arrange(desc(city_pop)) %>% 
+  head(20)
+```
 
+```{r}
+cl_has_any_time = df_merged %>% 
+  filter(is.na(clip)==F,city_pop>100000,threshold_num>=6,
+         threshold_cat=="units") %>% 
+  distinct(situs_city,situs_state,city_pop) %>% 
+  arrange(desc(city_pop)) %>% 
+  head(20)
+```
 
+```{r}
+cl_has_any_time %>% 
+  left_join(cl_has_post_adoption,by=c("situs_city","situs_state")) %>% 
+  filter(is.na(city_pop.y)==T)
+```
+
+```{r}
+df_iz %>% 
+  filter(government_type!='Town or city',threshold_cat=='units',threshold_num>=6)
+```
+
+```{r}
+df_iz %>% 
+  filter(threshold_num>=10,threshold_cat=='units') %>% 
+  arrange(desc(city_pop)) %>% 
+  head()
+```
+
+```{r}
+df_iz %>% filter(government_name=='San Francisco')
+```
 
