@@ -54,8 +54,8 @@ df_iz = df_iz_raw %>%
          state=str_replace(state,"D.C.","DC"),
     # Manual override policy details based on research
     # https://www.fbm.com/publications/what-you-need-to-know-about-san-franciscos-inclusionary-affordable-housing-program/
-    #minimum_project_size=ifelse(government_name=='San Francisco','25 units',minimum_project_size),
-    #year_program_adopted=ifelse(government_name=='San Francisco','2016',year_program_adopted)
+    minimum_project_size=ifelse(government_name=='San Francisco','25 units',minimum_project_size),
+    year_program_adopted=ifelse(government_name=='San Francisco','2016',year_program_adopted)
     ) %>% 
   filter(minimum_project_size!="missing") %>% 
   left_join(df_pops %>% select(City,state_code,city_pop=Population),
@@ -160,9 +160,10 @@ df_sf = df_sf_raw %>%
              fips_code="06075",
           # Using filed date instead of year built because it makes more sense 
           # based on expected IZ developer behavior
+            date_built = as.Date(`Filed Date`,format="%m/%d/%Y"),
              year_built=as.numeric(format(as.Date(`Filed Date`, format = "%m/%d/%Y"), format = "%Y"))) %>% 
-      select(any_of(names(df_cl))) %>%
-      filter(number_of_units>=2,year_built>max_year_cl_sf)
+      filter(number_of_units>=2,str_detect(`Permit Type Definition`,"new construction")) %>% 
+      select(any_of(names(df_cl)),date_built)
 head(df_sf)
 ```
 
@@ -231,19 +232,6 @@ df_missing %>%
   head(10)
 ```
 
-```{r}
-df_cl %>% 
-  filter(str_detect(situs_city,"RICHMOND")) %>% 
-  distinct(situs_city,situs_county,situs_state) %>% 
-  head(10)
-```
-
-
-```{r}
-df_cl %>% filter(is.na(situs_city)) %>% count(municipality_name,situs_county,situs_state) %>% arrange(desc(n))
-```
-
-
 Handle San Mateo edge case
 ```{r}
 df_merged %>% filter(str_detect(situs_county,"SAN MAT")) %>% 
@@ -279,7 +267,8 @@ df_analysis %>%
 ```{r}
 df_units = df_analysis %>% 
   filter(threshold_cat=="units",threshold_num>=5) %>% 
-  mutate(rel_units=number_of_units-threshold_num)
+  mutate(rel_units=number_of_units-threshold_num,
+         units_below_thresh=threshold_num-number_of_units)
 dim(df_units)
 df_units %>% head()
 ```
@@ -288,14 +277,30 @@ ggplot(df_units %>% filter(number_of_units<=50,threshold_num<=40,threshold_num>=
        aes(x=rel_units)) +
   geom_histogram(bins=150,color='white')
 ```
-
 ```{r}
 df_units %>% 
   mutate(bunch_ind = as.numeric((threshold_num-number_of_units==1)|
            (threshold_num-number_of_units==2)&(threshold_num %% 2 == 0)),
-         pre_bunch_ind = as.numeric((threshold_num-number_of_units==3)|
-           (threshold_num-number_of_units==2)&(threshold_num %% 2 == 1))) %>% 
-  group_by(situs_city,situs_state) %>% 
+         pre_bunch_ind = as.numeric(
+           (((threshold_num-number_of_units) %in% c(3,4))&(threshold_num %% 2 == 0))|
+           (((threshold_num-number_of_units) %in% c(2,3))&(threshold_num %% 2 == 1))
+           )) %>% 
+  filter(situs_city=='PORTLAND',situs_state=='OR') %>% 
+  group_by(threshold_num,number_of_units,bunch_ind,pre_bunch_ind) %>% 
+  summarize(n())
+```
+
+
+```{r}
+df_units %>% 
+  mutate(bunch_ind = as.numeric((units_below_thresh==1)|
+           (units_below_thresh==2)&(threshold_num %% 2 == 0)),
+         pre_bunch_ind = as.numeric(
+           ((units_below_thresh %in% c(3,4))&(threshold_num %% 2 == 0))|
+           ((units_below_thresh %in% c(2,3))&(threshold_num %% 2 == 1))
+           )) %>% 
+  filter(threshold_num>=7) %>% 
+  group_by(situs_city,situs_state,threshold_num) %>% 
   summarize(n_bunch_ind=sum(bunch_ind),
             n_pre_bunch_ind = sum(pre_bunch_ind),
             n_total=n(),
@@ -306,7 +311,7 @@ df_units %>%
 ```{r}
 single_eda_plot = function(city,state,data=df_units){
   data_filtered = df_units %>% filter(situs_city==city,situs_state==state,
-                      rel_units<=50,bldg_year_combined>=year_program_adopted)
+                      rel_units<=50)
   n_bins = max(data_filtered$number_of_units)-min(data_filtered$number_of_units)
   thresh = data_filtered$threshold_num %>% first
 ggplot(data_filtered,
@@ -314,7 +319,7 @@ ggplot(data_filtered,
   geom_histogram(bins=n_bins,color='white') +
   geom_vline(xintercept=thresh,color='red')
 }
-single_eda_plot(city="SAN FRANCISCO",state="CA")
+single_eda_plot(city="REDMOND",state="WA")
 ```
 
 
@@ -351,7 +356,7 @@ Cities missing from CL completely
 ```{r}
 df_merged %>% 
   filter(is.na(clip),threshold_cat=="units",threshold_num>=6,city_pop>=100000) %>% 
-  select(government_name,state,city_pop) %>% 
+  distinct(government_name,state,city_pop) %>% 
   arrange(desc(city_pop))
 ```
 Cities missing recent data from CL (post-IZ adoption)
@@ -393,5 +398,74 @@ df_iz %>%
 
 ```{r}
 df_iz %>% filter(government_name=='San Francisco')
+```
+
+# Bunching Analysis
+## San Francisco, CA
+
+```{r}
+df_sf %>% 
+  filter(number_of_units>=2,
+         number_of_units<=50,date_built>="2016-06-01") %>% 
+  ggplot(aes(x=number_of_units)) + 
+  geom_histogram(color='white',bins=45)
+```
+```{r}
+min_units = 3
+max_units = 200
+sf_post_start_date = "2016-06-08"
+df_sf_hist = df_sf %>% 
+  filter(number_of_units>=min_units,
+         number_of_units<=max_units,date_built>=sf_post_start_date) %>% 
+  count(number_of_units,name='freq') %>% 
+  # Add missing zero frequencies
+  complete(number_of_units=min_units:max_units,fill=list(freq=0)) %>% 
+  mutate(number_of_units_inverse=1/number_of_units,
+         number_of_units_inverse_squared = 1/number_of_units^2)
+sf_counterfactual_max = 23
+df_sf_hist_train = df_sf_hist %>% 
+  filter(number_of_units<=sf_counterfactual_max)
+
+sf_counterfactual_model_inv = lm(freq~number_of_units_inverse+number_of_units_inverse_squared,
+                             data=df_sf_hist_train)
+sf_counterfactual_model_exp = nls(freq~a*exp(-b*number_of_units),
+                            data=df_sf_hist_train, start = list(a = 1000, b = 0.5))
+sf_counterfactual_model_pow = nls(freq~a*number_of_units^(-b),
+                              data=df_sf_hist_train, start = list(a = 1000, b = 0.5))
+
+df_sf_hist$counterfactual_freq_inv = predict(sf_counterfactual_model_inv,df_sf_hist) %>% round(1)
+df_sf_hist$counterfactual_freq_exp = predict(sf_counterfactual_model_exp,df_sf_hist) %>% round(1)
+df_sf_hist$counterfactual_freq_pow = predict(sf_counterfactual_model_pow,df_sf_hist) %>% round(1)
+
+df_sf_hist
+```
+```{r}
+df_sf_hist %>% 
+  filter(number_of_units>=3,number_of_units<=100) %>% 
+  ggplot() +
+  geom_bar(aes(x=number_of_units,y=freq),stat='identity') +
+  geom_line(aes(x=number_of_units,y=counterfactual_freq_pow),color='blue') +
+  geom_vline(xintercept=23.5,linetype='dashed',color='blue') +
+  geom_vline(xintercept=24.5,linetype='dashed',color='black') +
+  scale_x_continuous(n.breaks=10) +
+  labs(x = 'Number of Units per Building',
+       y = 'Frequency',
+       title = 'Frequency of Apartment Building Unit Counts in SF, 6/2016-4/2023')
+```
+```{r}
+df_sf_hist %>% 
+  summarize(n_actual=sum(number_of_units*freq),
+            n_counterfactual=sum(number_of_units*counterfactual_freq_pow))
+```
+
+
+## Portland, OR
+
+```{r}
+df_analysis %>% 
+  filter(situs_city=='PORTLAND',situs_state=='OR',number_of_units>=3,
+         number_of_units<=50) %>% 
+  ggplot(aes(x=number_of_units)) + 
+  geom_histogram(color='white',bins=45)
 ```
 
