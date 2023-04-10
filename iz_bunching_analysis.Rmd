@@ -30,7 +30,7 @@ df_iz_raw = read_excel("ih.org-inclusionary-database/Local Inclusionary Housing 
                  sheet="data",skip=1)
 head(df_iz_raw)
 ```
-# Cleaning and Processing Data
+# Cleaning/Processing
 
 ```{r}
 df_pops = read_csv("https://raw.githubusercontent.com/plotly/datasets/master/us-cities-top-1k.csv") %>% 
@@ -220,6 +220,7 @@ df_merged %>%
   slice_sample(n=20)
 ```
 
+## Missing data check
 Check for IZ policies with missing property data
 
 Note: I looked for the top 10 missing IZ cities by city pop and didn't find in non-historical CL data
@@ -232,6 +233,7 @@ df_missing %>%
   head(10)
 ```
 
+## Edge cases to handle
 Handle San Mateo edge case
 ```{r}
 df_merged %>% filter(str_detect(situs_county,"SAN MAT")) %>% 
@@ -240,7 +242,7 @@ df_merged %>% filter(str_detect(situs_county,"SAN MAT")) %>%
   head()
 ```
 
-
+## Prep data for analysis
 ```{r}
 df_analysis = df_merged %>% 
   mutate(bldg_year_combined=coalesce(effective_year_built,year_built),
@@ -272,24 +274,13 @@ df_units = df_analysis %>%
 dim(df_units)
 df_units %>% head()
 ```
+
+# National Analysis
 ```{r}
 ggplot(df_units %>% filter(number_of_units<=50,threshold_num<=40,threshold_num>=10),
        aes(x=rel_units)) +
   geom_histogram(bins=150,color='white')
 ```
-```{r}
-df_units %>% 
-  mutate(bunch_ind = as.numeric((threshold_num-number_of_units==1)|
-           (threshold_num-number_of_units==2)&(threshold_num %% 2 == 0)),
-         pre_bunch_ind = as.numeric(
-           (((threshold_num-number_of_units) %in% c(3,4))&(threshold_num %% 2 == 0))|
-           (((threshold_num-number_of_units) %in% c(2,3))&(threshold_num %% 2 == 1))
-           )) %>% 
-  filter(situs_city=='PORTLAND',situs_state=='OR') %>% 
-  group_by(threshold_num,number_of_units,bunch_ind,pre_bunch_ind) %>% 
-  summarize(n())
-```
-
 
 ```{r}
 df_units %>% 
@@ -349,14 +340,14 @@ df_building_area %>%
   head()
 ```
 
-
+# Case Study ID
 Promising candidates for single-city datasets
 
 Cities missing from CL completely
 ```{r}
 df_merged %>% 
   filter(is.na(clip),threshold_cat=="units",threshold_num>=6,city_pop>=100000) %>% 
-  distinct(government_name,state,city_pop) %>% 
+  distinct(government_name,state,city_pop,threshold_num,threshold_cat) %>% 
   arrange(desc(city_pop))
 ```
 Cities missing recent data from CL (post-IZ adoption)
@@ -400,7 +391,7 @@ df_iz %>%
 df_iz %>% filter(government_name=='San Francisco')
 ```
 
-# Bunching Analysis
+# Case Study Analysis
 ## San Francisco, CA
 
 ```{r}
