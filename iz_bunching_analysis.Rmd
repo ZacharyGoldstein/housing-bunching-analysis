@@ -98,8 +98,12 @@ df_iz %<>%
 dim(df_iz)
 head(df_iz)
 ```
+
+## Single City Datasets
 Combine CoreLogic with other property datasets
 
+
+### Portland, OR
 ```{r}
 # Portland OR isn't in the non-historical CL at all so can easily combine without de-duping
 df_pd = read_csv("data/PDX_Residential_Building_Permits_20230328.csv",
@@ -116,13 +120,14 @@ df_pd = read_csv("data/PDX_Residential_Building_Permits_20230328.csv",
              year_built=YEAR_) %>% 
       select(any_of(names(df_cl)))
 ```
-
+### San Diego
 ```{r}
 max_year_cl_sd = df_cl %>% 
                 filter(situs_city=='SAN DIEGO',situs_state=='CA') %>% 
                 pull(year_built) %>% 
                 max(na.rm=T)
-df_sd_raw = read_csv("data/san_diego_parcels.csv",col_select = -SITUS_FRACTION,
+df_sd_raw = read_csv("data/san_diego_parcels.csv",
+                     col_select = c("UNITQTY","YEAR_EFFECTIVE"),
                      show_col_types=F)
 df_sd = df_sd_raw %>% 
    mutate(municipality_name="SAN DIEGO",
@@ -140,7 +145,7 @@ df_sd = df_sd_raw %>%
       filter(number_of_units>=2,year_built>max_year_cl_sd)
 head(df_sd)
 ```
-
+### San Francisco
 ```{r}
 df_sf_raw = read_csv("data/sf_building_permits_20230404.csv",
                      show_col_types=F,
@@ -166,6 +171,119 @@ df_sf = df_sf_raw %>%
       select(any_of(names(df_cl)),date_built)
 head(df_sf)
 ```
+### San Jose
+```{r}
+# Just active bulding permits, so shouldn't overlap with CL
+df_sj_raw = read_csv("data/san_jose_buildingpermitsactive.csv",
+                     show_col_types=F)
+df_sj = df_sj_raw %>% 
+   mutate(municipality_name="SAN JOSE",
+             situs_city="SAN JOSE",
+             situs_county="SANTA CLARA",
+             situs_state="CA",
+             number_of_units=DWELLINGUNITS,
+             number_of_buildings=1,
+             fips_code="06085",
+             date_built = as.Date(ISSUEDATE,format="%m/%d/%Y"),
+             year_built=as.numeric(format(as.Date(ISSUEDATE, format = "%m/%d/%Y"), format = "%Y"))) %>% 
+      filter(number_of_units>=2,WORKDESCRIPTION=='New Construction') %>% 
+      select(any_of(names(df_cl)),date_built)
+head(df_sj)
+```
+
+### Denver
+
+```{r}
+df_dn_raw = read_csv("data/denver_real_property_residential_characteristics.csv",
+                     show_col_types=F,col_select=c("UNITS","CCYRBLT"))
+df_dn = df_dn_raw %>% 
+   mutate(municipality_name="DENVER",
+             situs_city="DENVER",
+             situs_county="DENVER",
+             situs_state="CO",
+             number_of_units=UNITS,
+             number_of_buildings=1,
+             fips_code="08031",
+             year_built=CCYRBLT) %>% 
+      filter(number_of_units>=2) %>% 
+      select(any_of(names(df_cl)))
+head(df_dn)
+```
+
+### Minneapolis
+
+```{r}
+max_year_cl_mn = df_cl %>% 
+                filter(situs_city=='MINNEAPOLIS',situs_state=='MN') %>% 
+                pull(year_built) %>% 
+                max(na.rm=T)
+df_mn_raw = read_csv("data/minneapolis_permits_20230412.csv",
+                     show_col_types=F,col_select=c("dwellingUnitsNew","issueDate"))
+df_mn = df_mn_raw %>% 
+   mutate(municipality_name="MINNEAPOLIS",
+             situs_city="MINNEAPOLIS",
+             situs_county="HENNEPIN",
+             situs_state="MN",
+             number_of_units=dwellingUnitsNew,
+             number_of_buildings=1,
+             fips_code="27053",
+             date_built = as_date(ymd_hms(issueDate)),
+             year_built= year(ymd_hms(issueDate))) %>% 
+      filter(number_of_units>=2,year_built>max_year_cl_mn) %>% 
+      select(any_of(names(df_cl)),date_built)
+head(df_mn)
+```
+
+### New Jersey
+```{r}
+# There's no NJ at all in CL, so no duplicates
+df_nj_raw = read_csv("data/NJ_permits_20230412.csv",
+                     show_col_types=F,col_select=c("Sale Units Gained",
+          "Rental Units Gained","Municipality Name","County","Permit Date"))
+df_nj = df_nj_raw %>% 
+   mutate(municipality_name=`Municipality Name`,
+             situs_city=`Municipality Name`,
+             situs_county=`County`,
+             situs_state="NJ",
+             number_of_units=`Sale Units Gained`+`Rental Units Gained`,
+             number_of_buildings=1,
+            # fips_code=,
+             date_built = mdy(`Permit Date`),
+             year_built= year(mdy(`Permit Date`))) %>% 
+      filter(number_of_units>=2) %>% 
+      select(any_of(names(df_cl)),date_built)
+head(df_nj)
+```
+
+
+
+## Data Quality Check
+
+Compare CoreLogic to other data sources
+```{r}
+# SF
+df_sf %>% 
+  head()
+df_cl_sf_recent = df_cl %>% 
+  filter(situs_city=='SAN FRANCISCO',
+         year_built>= (df_sf %>% pull(year_built) %>% min))
+df_cl_sf_recent %>% 
+  head()
+```
+```{r}
+df_cl_sf_recent %>% nrow
+```
+
+```{r}
+df_sf %>% nrow
+```
+
+```{r}
+df_cl_sf_recent %>% 
+  filter(number_of_units<=50,number_of_units>=4) %>% 
+  ggplot(aes(x=number_of_units)) +
+  geom_histogram(bins=40,color='white')
+```
 
 ```{r}
 # Exclude cities where I prefer to just use non-corelogic dataset to avoid dupes
@@ -174,7 +292,11 @@ df_properties = df_cl %>%
   filter(situs_city %in% cities_to_exclude_from_cl == F) %>% 
   bind_rows(df_pd) %>% 
   bind_rows(df_sd) %>% 
-  bind_rows(df_sf)
+  bind_rows(df_sf) %>% 
+  bind_rows(df_sj) %>% 
+  bind_rows(df_dn) %>% 
+  bind_rows(df_mn) %>% 
+  bind_rows(df_nj)
 df_properties %>% 
   tail()
 ```
@@ -234,7 +356,7 @@ df_missing %>%
 ```
 
 ## Edge cases to handle
-Handle San Mateo edge case
+Handle San Mateo, Santa Clara edge cases with double requirement at city + county level
 ```{r}
 df_merged %>% filter(str_detect(situs_county,"SAN MAT")) %>% 
   select(situs_city,situs_county,situs_state,government_name) %>% 
@@ -250,7 +372,7 @@ df_analysis = df_merged %>%
   filter(is.na(bldg_year_combined)==F,is.na(threshold_cat)==F,number_of_buildings==1,
          # Either date of adoption unknown, or the building was built after IZ adoption
          (bldg_year_combined>=year_program_adopted|year_program_adopted=="Don't know")) %>% 
-  select(situs_city,situs_county,situs_state,government_type,
+  select(situs_city,situs_county,situs_state,government_name,government_type,
         acres,land_square_footage,bldg_sq_ft_combined,
         bldg_year_combined,number_of_units,number_of_buildings,
         threshold_cat,threshold_num,year_program_adopted,year_program_updated)
@@ -274,6 +396,61 @@ df_units = df_analysis %>%
 dim(df_units)
 df_units %>% head()
 ```
+# EDA
+
+## Counts
+
+```{r}
+# How many IZ programs are in the inclusionary housing spreadsheet?
+df_iz_raw %>% nrow
+```
+
+```{r}
+# How many IZ programs in the spreadsheet have a threshold?
+df_iz %>% 
+  count(threshold_cat) %>% 
+  arrange(desc(n))
+```
+
+```{r}
+# How many unique jurisdictions have IZ programs with a threshold?
+df_iz %>% 
+  pull(government_name) %>% 
+  unique() %>% 
+  length
+```
+
+```{r}
+# How many IZ jurisdictions overlap with Property Data (CL + other)?
+df_merged %>% 
+  filter(is.na(number_of_units)==F) %>% 
+  pull(government_name) %>% 
+  unique() %>% 
+  length
+```
+
+```{r}
+# How many IZ jurisdictions overlap with Property Data (CL + other) if we limit to 
+# properties from after the start of the IZ program?
+df_analysis %>% 
+  pull(government_name) %>% 
+  unique() %>% 
+  length
+```
+
+```{r}
+# How many properties are in that dataset?
+df_analysis %>% nrow
+```
+
+```{r}
+# And which cities are they in?
+df_analysis %>% 
+  count(situs_city,situs_state) %>% 
+  arrange(desc(n)) %>% 
+  head(10)
+```
+
 
 # National Analysis
 ```{r}
@@ -289,14 +466,22 @@ df_units %>%
          pre_bunch_ind = as.numeric(
            ((units_below_thresh %in% c(3,4))&(threshold_num %% 2 == 0))|
            ((units_below_thresh %in% c(2,3))&(threshold_num %% 2 == 1))
-           )) %>% 
+           ),
+         post_bunch_ind = as.numeric(units_below_thresh==0),
+         one_below_ind = as.numeric(units_below_thresh==1),
+         ) %>% 
   filter(threshold_num>=7) %>% 
   group_by(situs_city,situs_state,threshold_num) %>% 
-  summarize(n_bunch_ind=sum(bunch_ind),
-            n_pre_bunch_ind = sum(pre_bunch_ind),
+  summarize(n_bunch=sum(bunch_ind),
+            n_pre_bunch = sum(pre_bunch_ind),
+            n_post_bunch = sum(post_bunch_ind),
+            n_one_below = sum(one_below_ind),
             n_total=n(),
-            n_diff=n_bunch_ind-n_pre_bunch_ind) %>% 
+            n_diff=n_bunch-n_pre_bunch) %>% 
   arrange(desc(n_diff)) %>% 
+  # If IZ takes effect at unit counts >=X...
+  # ... there should be more buildings of size X-1 than of X in the jurisdiction
+  filter(n_post_bunch<n_one_below) %>% 
   head(10)
 ```
 ```{r}
@@ -308,9 +493,11 @@ single_eda_plot = function(city,state,data=df_units){
 ggplot(data_filtered,
        aes(x=number_of_units)) +
   geom_histogram(bins=n_bins,color='white') +
-  geom_vline(xintercept=thresh,color='red')
+  geom_vline(xintercept=thresh,color='red') + 
+  labs(title=str_glue("Distribution of Apartment Building Unit Counts in {city}, {state}"),
+       y="Frequency",x = "Units per Apartment Building")
 }
-single_eda_plot(city="REDMOND",state="WA")
+single_eda_plot(city="DENVER",state="CO")
 ```
 
 
@@ -346,7 +533,8 @@ Promising candidates for single-city datasets
 Cities missing from CL completely
 ```{r}
 df_merged %>% 
-  filter(is.na(clip),threshold_cat=="units",threshold_num>=6,city_pop>=100000) %>% 
+  filter(is.na(clip),threshold_cat=="units",threshold_num>=6,city_pop>=100000,
+         year_program_adopted<=2020) %>% 
   distinct(government_name,state,city_pop,threshold_num,threshold_cat) %>% 
   arrange(desc(city_pop))
 ```
@@ -354,7 +542,7 @@ Cities missing recent data from CL (post-IZ adoption)
 ```{r}
 cl_has_post_adoption = df_merged %>% 
   filter(year_built>year_program_adopted,city_pop>100000,threshold_num>=6,
-         threshold_cat=="units") %>% 
+         threshold_cat=="units",year_program_adopted<=2020|year_program_adopted=="Don't know") %>% 
   distinct(situs_city,situs_state,city_pop) %>% 
   arrange(desc(city_pop)) %>% 
   head(20)
@@ -363,7 +551,7 @@ cl_has_post_adoption = df_merged %>%
 ```{r}
 cl_has_any_time = df_merged %>% 
   filter(is.na(clip)==F,city_pop>100000,threshold_num>=6,
-         threshold_cat=="units") %>% 
+         threshold_cat=="units",year_program_adopted<=2020|year_program_adopted=="Don't know") %>% 
   distinct(situs_city,situs_state,city_pop) %>% 
   arrange(desc(city_pop)) %>% 
   head(20)
@@ -376,8 +564,10 @@ cl_has_any_time %>%
 ```
 
 ```{r}
-df_iz %>% 
-  filter(government_type!='Town or city',threshold_cat=='units',threshold_num>=6)
+df_merged %>% 
+  filter(government_type!='Town or city',threshold_cat=='units',threshold_num>=6,
+         is.na(number_of_units),year_program_adopted<=2020|year_program_adopted=="Don't know") %>% 
+  pull(program_id)
 ```
 
 ```{r}
@@ -403,7 +593,7 @@ df_sf %>%
 ```
 ```{r}
 min_units = 3
-max_units = 200
+max_units = 100
 sf_post_start_date = "2016-06-08"
 df_sf_hist = df_sf %>% 
   filter(number_of_units>=min_units,
@@ -443,10 +633,55 @@ df_sf_hist %>%
        y = 'Frequency',
        title = 'Frequency of Apartment Building Unit Counts in SF, 6/2016-4/2023')
 ```
+
+
+### Interpolation Approach
+
+```{r}
+df_sf_hist_train_interpol_2 = df_sf_hist %>% 
+  filter(number_of_units<=sf_counterfactual_max|number_of_units>=sf_counterfactual_max*1.5)
+df_sf_hist_train_interpol_3 = df_sf_hist %>% 
+  filter(number_of_units<=sf_counterfactual_max|number_of_units>=sf_counterfactual_max*2)
+df_sf_hist_train_interpol_4 = df_sf_hist %>% 
+  filter(number_of_units<=sf_counterfactual_max|number_of_units>=sf_counterfactual_max*3)
+
+sf_counterfactual_model_pow_interpol_2 = nls(freq~a*number_of_units^(-b),
+                              data=df_sf_hist_train_interpol_2, start = list(a = 1000, b = 0.5))
+sf_counterfactual_model_pow_interpol_3 = nls(freq~a*number_of_units^(-b),
+                              data=df_sf_hist_train_interpol_3, start = list(a = 1000, b = 0.5))
+sf_counterfactual_model_pow_interpol_4 = nls(freq~a*number_of_units^(-b),
+                              data=df_sf_hist_train_interpol_4, start = list(a = 1000, b = 0.5))
+
+df_sf_hist$counterfactual_freq_pow_interpol_2 = predict(sf_counterfactual_model_pow_interpol_2,df_sf_hist) %>% round(1)
+df_sf_hist$counterfactual_freq_pow_interpol_3 = predict(sf_counterfactual_model_pow_interpol_3,df_sf_hist) %>% round(1)
+df_sf_hist$counterfactual_freq_pow_interpol_4 = predict(sf_counterfactual_model_pow_interpol_4,df_sf_hist) %>% round(1)
+
+df_sf_hist
+```
+
+```{r}
+df_sf_hist %>% 
+  filter(number_of_units>=3,number_of_units<=100) %>% 
+  ggplot() +
+  geom_bar(aes(x=number_of_units,y=freq),stat='identity') +
+  geom_line(aes(x=number_of_units,y=counterfactual_freq_pow_interpol_2),color='blue') +
+  geom_vline(xintercept=23.5,linetype='dashed',color='blue') +
+  geom_vline(xintercept=24.5,linetype='dashed',color='black') +
+  scale_x_continuous(n.breaks=10) +
+  labs(x = 'Number of Units per Building',
+       y = 'Frequency',
+       title = 'Frequency of Apartment Building Unit Counts in SF, 6/2016-4/2023')
+```
+
+Interpolation only slightly increases fatness of tails. Need to try different 
+distribution.
 ```{r}
 df_sf_hist %>% 
   summarize(n_actual=sum(number_of_units*freq),
-            n_counterfactual=sum(number_of_units*counterfactual_freq_pow))
+            n_counterfactual=sum(number_of_units*counterfactual_freq_pow),
+            sum(number_of_units*counterfactual_freq_pow_interpol_2),
+            sum(number_of_units*counterfactual_freq_pow_interpol_3),
+            sum(number_of_units*counterfactual_freq_pow_interpol_4))
 ```
 
 
