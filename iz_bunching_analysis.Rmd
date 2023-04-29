@@ -173,7 +173,7 @@ head(df_sf)
 ```
 ### San Jose
 ```{r}
-# Just active bulding permits, so shouldn't overlap with CL
+# Just active building permits, so shouldn't overlap with CL
 df_sj_raw = read_csv("data/san_jose_buildingpermitsactive.csv",
                      show_col_types=F)
 df_sj = df_sj_raw %>% 
@@ -254,7 +254,72 @@ df_nj = df_nj_raw %>%
       select(any_of(names(df_cl)),date_built)
 head(df_nj)
 ```
+### Honolulu
+```{r}
+df_ho_raw = read_csv("data/honolulu_permits_20221231.csv",
+                     show_col_types=F,col_select=c(
+      #"issuedate","statusdescription","proposeduse","numunitsdel",
+      "createddate","numunitsadd","newbuilding","structurecode"))
+df_ho = df_ho_raw %>% 
+   mutate(municipality_name="OAHU",
+             situs_city="HONOLULU",
+             situs_county="OAHU",
+             situs_state="HI",
+             number_of_units=`numunitsadd`,
+             number_of_buildings=1,
+            fips_code="15003",
+            date_built = mdy(`createddate`),
+             year_built= year(mdy(`createddate`))) %>% 
+      filter(newbuilding=='Y',structurecode=="53 - APARTMENT (3 OR MORE)",
+             numunitsadd>=3) %>% 
+   select(any_of(names(df_cl)),date_built)
+head(df_ho)
+```
 
+### Fairfax, VA
+```{r}
+df_ff_raw = read_csv("data/fairfax_housing_units.csv")
+df_ff = df_ff_raw %>% 
+  # Exclude single family homes and mobile homes
+  filter(HOUSI_UNIT_TYPE %in% c("SF","MH")==F) %>% 
+  # Group units at same location into buildings
+  group_by(X,Y) %>% 
+  summarize(number_of_units=sum(CURRE_UNIT),
+            year_built=median(YEAR_BUILT)) %>% 
+  mutate(situs_county="FAIRFAX",
+             situs_state="VA",
+             number_of_buildings=1,
+            fips_code="51059") %>% 
+      filter(number_of_units>=2) %>% 
+  ungroup %>% 
+  select(any_of(names(df_cl)))
+head(df_ff)
+```
+### Montgomery, MD
+```{r}
+# Not in CL at all so don't need to worry about dupes
+df_mg_raw = read_csv("data/montgomery_housing_reg.csv")
+df_mg = df_mg_raw %>% 
+  select(`Property Street Address`,
+         `Property City`,
+         `Structure Type`,
+         `Unit Count`,`Year Built`) %>% 
+  filter(str_detect(`Structure Type`,'Accessory')==F,
+         `Structure Type`!='Single Family') %>% 
+  group_by(`Property Street Address`,`Property City`,year_built=`Year Built`) %>% 
+  summarize(number_of_units=sum(`Unit Count`)) %>% 
+  filter(number_of_units>=2) %>% 
+  mutate(municipality_name=`Property City`,
+         situs_city=`Property City`,
+         situs_county="MONTGOMERY",
+             situs_state="MD",
+             number_of_buildings=1,
+            fips_code="24031") %>% 
+  ungroup %>% 
+  select(any_of(names(df_cl)))
+df_mg %>% 
+  head()
+```
 
 
 ## Data Quality Check
@@ -285,18 +350,25 @@ df_cl_sf_recent %>%
   geom_histogram(bins=40,color='white')
 ```
 
+## Data Merging
 ```{r}
 # Exclude cities where I prefer to just use non-corelogic dataset to avoid dupes
 cities_to_exclude_from_cl = "SAN FRANCISCO"
+min_year_ho = df_ho$year_built %>% min
 df_properties = df_cl %>% 
-  filter(situs_city %in% cities_to_exclude_from_cl == F) %>% 
+  filter(situs_city %in% cities_to_exclude_from_cl == F,
+         situs_city!="HONOLULU"|year_built<min_year_ho,
+         situs_county!='FAIRFAX'|situs_state!='VA') %>% 
   bind_rows(df_pd) %>% 
   bind_rows(df_sd) %>% 
   bind_rows(df_sf) %>% 
   bind_rows(df_sj) %>% 
   bind_rows(df_dn) %>% 
   bind_rows(df_mn) %>% 
-  bind_rows(df_nj)
+  bind_rows(df_nj) %>% 
+  bind_rows(df_ho) %>% 
+  bind_rows(df_ff) %>% 
+  bind_rows(df_mg)
 df_properties %>% 
   tail()
 ```
@@ -453,6 +525,8 @@ df_analysis %>%
 
 
 # National Analysis
+
+## Unit Threhsolds
 ```{r}
 ggplot(df_units %>% filter(number_of_units<=50,threshold_num<=40,threshold_num>=10),
        aes(x=rel_units)) +
@@ -460,7 +534,7 @@ ggplot(df_units %>% filter(number_of_units<=50,threshold_num<=40,threshold_num>=
 ```
 
 ```{r}
-df_units %>% 
+df_unit_bunch = df_units %>% 
   mutate(bunch_ind = as.numeric((units_below_thresh==1)|
            (units_below_thresh==2)&(threshold_num %% 2 == 0)),
          pre_bunch_ind = as.numeric(
@@ -469,24 +543,48 @@ df_units %>%
            ),
          post_bunch_ind = as.numeric(units_below_thresh==0),
          one_below_ind = as.numeric(units_below_thresh==1),
+         two_below_ind = as.numeric(units_below_thresh==2)
          ) %>% 
-  filter(threshold_num>=7) %>% 
+  filter(threshold_num>=6)
+df_unit_bunch %>% 
   group_by(situs_city,situs_state,threshold_num) %>% 
   summarize(n_bunch=sum(bunch_ind),
             n_pre_bunch = sum(pre_bunch_ind),
             n_post_bunch = sum(post_bunch_ind),
             n_one_below = sum(one_below_ind),
+            n_two_below = sum(two_below_ind),
+            n_total=n(),
+            n_diff=n_bunch-n_pre_bunch) %>% 
+  arrange(desc(n_diff)) %>% 
+  # If IZ takes effect at unit counts >=X...
+  # ... there should be more buildings of size X-1 or X-2 than of X in the jurisdiction
+  filter(n_one_below>n_post_bunch|n_two_below>n_post_bunch) %>% 
+  head(10)
+```
+
+```{r}
+df_unit_bunch %>% 
+  group_by(situs_county,situs_state,threshold_num) %>% 
+  summarize(n_bunch=sum(bunch_ind),
+            n_pre_bunch = sum(pre_bunch_ind),
+            n_post_bunch = sum(post_bunch_ind),
+            n_one_below = sum(one_below_ind),
+            n_two_below = sum(two_below_ind),
             n_total=n(),
             n_diff=n_bunch-n_pre_bunch) %>% 
   arrange(desc(n_diff)) %>% 
   # If IZ takes effect at unit counts >=X...
   # ... there should be more buildings of size X-1 than of X in the jurisdiction
-  filter(n_post_bunch<n_one_below) %>% 
+  filter(n_one_below>n_post_bunch|n_two_below>n_post_bunch) %>% 
   head(10)
 ```
+
+
 ```{r}
-single_eda_plot = function(city,state,data=df_units){
-  data_filtered = df_units %>% filter(situs_city==city,situs_state==state,
+single_eda_plot = function(jurisdiction,state,data=df_units){
+  data_filtered = df_units %>% 
+    filter(situs_city==jurisdiction|situs_county==jurisdiction,
+                                      situs_state==state,
                       rel_units<=50)
   n_bins = max(data_filtered$number_of_units)-min(data_filtered$number_of_units)
   thresh = data_filtered$threshold_num %>% first
@@ -494,13 +592,25 @@ ggplot(data_filtered,
        aes(x=number_of_units)) +
   geom_histogram(bins=n_bins,color='white') +
   geom_vline(xintercept=thresh,color='red') + 
-  labs(title=str_glue("Distribution of Apartment Building Unit Counts in {city}, {state}"),
+  labs(title=str_glue("Distribution of Apartment Building Unit Counts in {jurisdiction}, {state}"),
        y="Frequency",x = "Units per Apartment Building")
 }
-single_eda_plot(city="DENVER",state="CO")
+single_eda_plot(jurisdiction="REDMOND",state="WA")
+```
+```{r}
+df_units %>% 
+  filter(situs_county=='FAIRFAX') %>% 
+  count(number_of_units)
+```
+
+```{r}
+df_units %>% 
+  filter(situs_city=='ROSEVILLE') %>% 
+  count(number_of_units)
 ```
 
 
+## Area Thresholds
 ```{r}
 sq_ft_per_acre = 43560
 df_parcel_area = df_analysis %>% 
@@ -541,8 +651,8 @@ df_merged %>%
 Cities missing recent data from CL (post-IZ adoption)
 ```{r}
 cl_has_post_adoption = df_merged %>% 
-  filter(year_built>year_program_adopted,city_pop>100000,threshold_num>=6,
-         threshold_cat=="units",year_program_adopted<=2020|year_program_adopted=="Don't know") %>% 
+  filter((year_built>year_program_adopted|year_program_adopted=="Don't know"),city_pop>100000,threshold_num>=6,
+         threshold_cat=="units",(year_program_adopted<=2020|year_program_adopted=="Don't know")) %>% 
   distinct(situs_city,situs_state,city_pop) %>% 
   arrange(desc(city_pop)) %>% 
   head(20)
@@ -683,7 +793,8 @@ df_sf_hist %>%
             sum(number_of_units*counterfactual_freq_pow_interpol_3),
             sum(number_of_units*counterfactual_freq_pow_interpol_4))
 ```
-
+### Pre-IZ Assumption Check
+ check to make sure no bunching before IZ start date
 
 ## Portland, OR
 
@@ -694,4 +805,9 @@ df_analysis %>%
   ggplot(aes(x=number_of_units)) + 
   geom_histogram(color='white',bins=45)
 ```
+# Moderation Analysis
 
+- understand heterogeneity in IZ effects
+- % of units required to be affordable
+- degree of affordability
+- other 
