@@ -321,7 +321,6 @@ df_mg %>%
   head()
 ```
 
-
 ## Data Quality Check
 
 Compare CoreLogic to other data sources
@@ -460,14 +459,26 @@ df_analysis %>%
   head(10)
 ```
 
+
 ```{r}
 df_units = df_analysis %>% 
   filter(threshold_cat=="units",threshold_num>=5) %>% 
   mutate(rel_units=number_of_units-threshold_num,
-         units_below_thresh=threshold_num-number_of_units)
+         units_below_thresh=threshold_num-number_of_units) %>% 
+  # Limit to counties where we have at least n distinct unit counts
+  inner_join(df_analysis %>% 
+  group_by(situs_county,situs_state) %>% 
+  summarize(nunique_unit_counts = length(unique(number_of_units))) %>% 
+  filter(nunique_unit_counts>=6) %>% 
+  select(situs_county,situs_state),
+    by=c("situs_county","situs_state")) 
+
 dim(df_units)
 df_units %>% head()
 ```
+
+
+
 # EDA
 
 ## Counts
@@ -547,7 +558,8 @@ df_unit_bunch = df_units %>%
          ) %>% 
   filter(threshold_num>=6)
 df_unit_bunch %>% 
-  group_by(situs_city,situs_state,threshold_num) %>% 
+  filter(government_type %in% c("Town or city","Special district")) %>% 
+  group_by(situs_city,situs_state,government_type,threshold_num) %>% 
   summarize(n_bunch=sum(bunch_ind),
             n_pre_bunch = sum(pre_bunch_ind),
             n_post_bunch = sum(post_bunch_ind),
@@ -559,12 +571,14 @@ df_unit_bunch %>%
   # If IZ takes effect at unit counts >=X...
   # ... there should be more buildings of size X-1 or X-2 than of X in the jurisdiction
   filter(n_one_below>n_post_bunch|n_two_below>n_post_bunch) %>% 
+  select(-n_one_below,-n_two_below) %>% 
   head(10)
 ```
 
 ```{r}
 df_unit_bunch %>% 
-  group_by(situs_county,situs_state,threshold_num) %>% 
+  filter(government_type %in% c("County","Consolidated city-county")) %>% 
+  group_by(situs_county,situs_state,government_type,threshold_num) %>% 
   summarize(n_bunch=sum(bunch_ind),
             n_pre_bunch = sum(pre_bunch_ind),
             n_post_bunch = sum(post_bunch_ind),
@@ -576,6 +590,7 @@ df_unit_bunch %>%
   # If IZ takes effect at unit counts >=X...
   # ... there should be more buildings of size X-1 than of X in the jurisdiction
   filter(n_one_below>n_post_bunch|n_two_below>n_post_bunch) %>% 
+  select(-n_one_below,-n_two_below) %>% 
   head(10)
 ```
 
@@ -603,11 +618,11 @@ df_units %>%
   count(number_of_units)
 ```
 
+### Hypothesis Testing
 ```{r}
-df_units %>% 
-  filter(situs_city=='ROSEVILLE') %>% 
-  count(number_of_units)
+
 ```
+
 
 
 ## Area Thresholds
@@ -795,6 +810,64 @@ df_sf_hist %>%
 ```
 ### Pre-IZ Assumption Check
  check to make sure no bunching before IZ start date
+ 
+### Inference
+
+Residuals Plot
+```{r}
+df_sf_hist %>% 
+  mutate(residual=freq-counterfactual_freq_pow,
+         zero=0) %>% 
+  ggplot(aes(x=number_of_units,xend=number_of_units,y=zero,yend=residual)) +
+  geom_segment() + 
+  geom_vline(xintercept=10,color='blue',linetype='dashed') +
+  geom_vline(xintercept=25,color='blue',linetype='dashed')
+```
+```{r}
+n_bootstraps = 500
+df_sf_boot = df_sf_hist %>% 
+  mutate(residual=freq-counterfactual_freq_pow,
+         threshold_num = 25,
+          units_below_thresh=threshold_num-number_of_units,
+         bunch_ind = as.numeric((units_below_thresh==1)|
+           (units_below_thresh==2)&(threshold_num %% 2 == 0)),
+         pre_bunch_ind = as.numeric(
+           ((units_below_thresh %in% c(3,4))&(threshold_num %% 2 == 0))|
+           ((units_below_thresh %in% c(2,3))&(threshold_num %% 2 == 1))
+           )) 
+
+n_pre_bunch_obs = df_sf_boot %>% filter(pre_bunch_ind==1) %>% pull(freq) %>% 
+    sum
+n_bunch_obs = df_sf_boot %>% filter(bunch_ind==1) %>% pull(freq) %>% 
+    sum
+n_diff_obs = n_bunch_obs-n_pre_bunch_obs
+
+nrows = nrow(df_sf_boot)
+boot_diffs = vector(length=n_bootstraps)
+for (i in 1:n_bootstraps){
+  df_sf_boot_i = df_sf_boot
+  random_residuals_sample = sample(df_sf_boot_i$residual,
+                                  size=nrows,
+                                   replace = T)
+  df_sf_boot_i$freq_boot = df_sf_boot_i$counterfactual_freq_pow+random_residuals_sample
+  # calculate bunching statistic
+  n_pre_bunch_i = df_sf_boot_i %>% filter(pre_bunch_ind==1) %>% pull(freq_boot) %>% 
+    sum
+  n_bunch_i = df_sf_boot_i %>% filter(bunch_ind==1) %>% pull(freq_boot) %>% 
+    sum
+  n_diff_i = n_bunch_i-n_pre_bunch_i
+  boot_diffs[i] = n_diff_i
+}
+```
+
+```{r}
+n_diff_obs
+p_val = length(boot_diffs[boot_diffs>n_diff_obs])/length(boot_diffs)
+p_val
+```
+
+
+bootstrap residuals resampling
 
 ## Portland, OR
 
