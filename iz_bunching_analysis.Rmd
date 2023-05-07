@@ -538,11 +538,82 @@ df_analysis %>%
 # National Analysis
 
 ## Unit Threhsolds
+
 ```{r}
-ggplot(df_units %>% filter(number_of_units<=50,threshold_num<=40,threshold_num>=10),
-       aes(x=rel_units)) +
-  geom_histogram(bins=150,color='white')
+df_units %>% count(threshold_num) %>% 
+  ggplot(aes(x=threshold_num,y=n)) +
+  geom_bar(stat='identity') +
+  labs(x = 'Unit Threshold',
+       y = 'Buildings in Dataset',
+       title = 'Distribution of Unit Thresholds')
 ```
+
+
+```{r}
+ggplot(df_units %>% filter(number_of_units<=50,number_of_units>=3),
+       aes(x=number_of_units)) +
+  geom_histogram(binwidth=1,color='white') +
+  labs(x = 'Number of Units',y='Frequency',
+       title = 'Distribution of Building Unit Counts')
+```
+
+```{r}
+ggplot(df_units %>% filter(number_of_units<=150),
+       aes(x=rel_units)) +
+  geom_histogram(binwidth=5,color='white') + 
+  labs(x = 'Units Relative to Threshold',
+       y = 'Frequency',
+       title = 'Relative Unit Count Frequencies')
+```
+
+
+```{r}
+ggplot(df_units %>% filter(number_of_units<=100,threshold_num<=9),
+       aes(x=rel_units)) +
+  geom_histogram(binwidth=2,color='white')
+```
+
+```{r}
+ggplot(df_units %>% filter(number_of_units<=100,threshold_num>=10,threshold_num<=14),
+       aes(x=rel_units)) +
+  geom_histogram(binwidth=2,color='white')
+```
+
+```{r}
+ggplot(df_units %>% filter(number_of_units<=100,threshold_num>=15,threshold_num<=19),
+       aes(x=rel_units)) +
+  geom_histogram(binwidth=2,color='white')
+```
+
+```{r}
+ggplot(df_units %>% filter(number_of_units<=100,threshold_num>=20,threshold_num<=24),
+       aes(x=rel_units)) +
+  geom_histogram(binwidth=2,color='white')
+```
+
+```{r}
+ggplot(df_units %>% filter(number_of_units<=100,threshold_num>=25,threshold_num<=29),
+       aes(x=rel_units)) +
+  geom_histogram(binwidth=2,color='white')
+```
+
+```{r}
+ggplot(df_units %>% filter(number_of_units<=100,threshold_num==30),
+       aes(x=rel_units)) +
+  geom_histogram(binwidth=2,color='white')
+```
+```{r}
+ggplot(df_units %>% filter(number_of_units<=100,threshold_num==50),
+       aes(x=rel_units)) +
+  geom_histogram(binwidth=2,color='white')
+```
+
+```{r}
+ggplot(df_units %>% filter(threshold_num==100),
+       aes(x=rel_units)) +
+  geom_histogram(color='white')
+```
+
 
 ```{r}
 df_unit_bunch = df_units %>% 
@@ -601,16 +672,15 @@ single_eda_plot = function(jurisdiction,state,data=df_units){
     filter(situs_city==jurisdiction|situs_county==jurisdiction,
                                       situs_state==state,
                       rel_units<=50)
-  n_bins = max(data_filtered$number_of_units)-min(data_filtered$number_of_units)
   thresh = data_filtered$threshold_num %>% first
 ggplot(data_filtered,
        aes(x=number_of_units)) +
-  geom_histogram(bins=n_bins,color='white') +
+  geom_histogram(binwidth=1,color='white') +
   geom_vline(xintercept=thresh,color='red') + 
   labs(title=str_glue("Distribution of Apartment Building Unit Counts in {jurisdiction}, {state}"),
        y="Frequency",x = "Units per Apartment Building")
 }
-single_eda_plot(jurisdiction="REDMOND",state="WA")
+single_eda_plot(jurisdiction="FAIRFAX",state="VA")
 ```
 ```{r}
 df_units %>% 
@@ -618,7 +688,7 @@ df_units %>%
   count(number_of_units)
 ```
 
-### Hypothesis Testing
+### Inference
 ```{r}
 
 ```
@@ -727,7 +797,11 @@ df_sf_hist = df_sf %>%
   # Add missing zero frequencies
   complete(number_of_units=min_units:max_units,fill=list(freq=0)) %>% 
   mutate(number_of_units_inverse=1/number_of_units,
-         number_of_units_inverse_squared = 1/number_of_units^2)
+         number_of_units_inverse_squared = 1/number_of_units^2,
+         freq_log = log(freq),
+         number_of_units_log=log(number_of_units),
+         freq_sqrt = sqrt(freq),
+         number_of_units_sqrt=sqrt(number_of_units))
 sf_counterfactual_max = 23
 df_sf_hist_train = df_sf_hist %>% 
   filter(number_of_units<=sf_counterfactual_max)
@@ -758,6 +832,7 @@ df_sf_hist %>%
        y = 'Frequency',
        title = 'Frequency of Apartment Building Unit Counts in SF, 6/2016-4/2023')
 ```
+
 
 
 ### Interpolation Approach
@@ -808,6 +883,36 @@ df_sf_hist %>%
             sum(number_of_units*counterfactual_freq_pow_interpol_3),
             sum(number_of_units*counterfactual_freq_pow_interpol_4))
 ```
+
+### Fat Tails
+
+```{r}
+library(poweRlaw)
+```
+
+
+```{r}
+sf_counterfactual_model_ft = plfit(freq_sqrt~number_of_units_sqrt,
+                              data=df_sf_hist_train)
+df_sf_hist$counterfactual_freq_ft = predict(sf_counterfactual_model_ft,df_sf_hist) %>% round(1)
+```
+
+```{r}
+df_sf_hist %>% 
+  filter(number_of_units>=3,number_of_units<=100) %>% 
+  ggplot() +
+  geom_bar(aes(x=number_of_units,y=freq),stat='identity') +
+  geom_line(aes(x=number_of_units,y=counterfactual_freq_nb),color='blue') +
+  geom_vline(xintercept=23.5,linetype='dashed',color='blue') +
+  geom_vline(xintercept=24.5,linetype='dashed',color='black') +
+  scale_x_continuous(n.breaks=10) +
+  labs(x = 'Number of Units per Building',
+       y = 'Frequency',
+       title = 'Frequency of Apartment Building Unit Counts in SF, 6/2016-4/2023')
+```
+
+
+
 ### Pre-IZ Assumption Check
  check to make sure no bunching before IZ start date
  
@@ -821,7 +926,10 @@ df_sf_hist %>%
   ggplot(aes(x=number_of_units,xend=number_of_units,y=zero,yend=residual)) +
   geom_segment() + 
   geom_vline(xintercept=10,color='blue',linetype='dashed') +
-  geom_vline(xintercept=25,color='blue',linetype='dashed')
+  geom_vline(xintercept=25,color='blue',linetype='dashed') + 
+  labs(x = 'Number of Units per Building',
+       y = 'Residual',
+       title = 'SF Model Residuals')
 ```
 ```{r}
 n_bootstraps = 500
@@ -866,6 +974,11 @@ p_val = length(boot_diffs[boot_diffs>n_diff_obs])/length(boot_diffs)
 p_val
 ```
 
+```{r}
+hist(boot_diffs,main='Distribution of Bootstrapped Test Statistics',
+     xlab = 'Test Statistic')
+```
+
 
 bootstrap residuals resampling
 
@@ -876,7 +989,7 @@ df_analysis %>%
   filter(situs_city=='PORTLAND',situs_state=='OR',number_of_units>=3,
          number_of_units<=50) %>% 
   ggplot(aes(x=number_of_units)) + 
-  geom_histogram(color='white',bins=45)
+  geom_histogram(color='white',binwidth=1)
 ```
 # Moderation Analysis
 
