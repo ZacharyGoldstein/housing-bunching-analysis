@@ -15,6 +15,7 @@ library(tidyverse)
 library(readxl)
 library(usdata)
 library(magrittr)
+library(rdd)
 options(dplyr.summarise.inform = FALSE)
 ```
 
@@ -558,14 +559,15 @@ ggplot(df_units %>% filter(number_of_units<=50,number_of_units>=3),
 ```
 
 ```{r}
-ggplot(df_units %>% filter(number_of_units<=150),
+ggplot(df_units %>% filter(rel_units<=50,rel_units>=-50),
        aes(x=rel_units)) +
-  geom_histogram(binwidth=5,color='white') + 
+  geom_histogram(binwidth=1,color='white') + 
   labs(x = 'Units Relative to Threshold',
        y = 'Frequency',
        title = 'Relative Unit Count Frequencies')
 ```
 
+### Group by Threshold
 
 ```{r}
 ggplot(df_units %>% filter(number_of_units<=100,threshold_num<=9),
@@ -613,7 +615,7 @@ ggplot(df_units %>% filter(threshold_num==100),
        aes(x=rel_units)) +
   geom_histogram(color='white')
 ```
-
+### Group by City
 
 ```{r}
 df_unit_bunch = df_units %>% 
@@ -682,15 +684,14 @@ ggplot(data_filtered,
 }
 single_eda_plot(jurisdiction="FAIRFAX",state="VA")
 ```
-```{r}
-df_units %>% 
-  filter(situs_county=='FAIRFAX') %>% 
-  count(number_of_units)
-```
+
 
 ### Inference
-```{r}
 
+#### McCrary Test
+
+```{r}
+DCdensity(runvar=df_units %>% pull(rel_units),cutpoint=0,ext.out=T)
 ```
 
 
@@ -790,6 +791,9 @@ df_sf %>%
 min_units = 3
 max_units = 100
 sf_post_start_date = "2016-06-08"
+sf_unit_counts = df_sf %>% 
+  filter(number_of_units>=min_units,
+         number_of_units<=max_units,date_built>=sf_post_start_date) %>% pull(number_of_units)
 df_sf_hist = df_sf %>% 
   filter(number_of_units>=min_units,
          number_of_units<=max_units,date_built>=sf_post_start_date) %>% 
@@ -909,12 +913,10 @@ ggplot(aes(x=x,y=y)) +
 ```
 
 
-
-
 ### Fat Tails
 
 ```{r}
-data("moby")
+#data("moby")
 ```
 
 
@@ -922,37 +924,87 @@ data("moby")
 library(poweRlaw)
 library(fitdistrplus)
 library(sads)
+library(FatTailsR)
 ```
 
 ```{r}
-x = df_sf_hist_train %>% filter(freq!=0) %>% pull(freq)
-fit_x = fitdist(x,"pareto",start=list(scale=1,shape=1))
-k = fit$estimate[1]
-a = fit$estimate[2]
-log_x = log(x ~ k)
-log_y = log(a) - a * log_x
-fit_reg = lm(log_y~log_x)
-plot(x, a*k^a / x^(a+1), type = "l", lwd = 2, col = "blue")
-lines(x, dpareto(x, scale = k, shape = a), type = "l", lwd = 2, col = "red")
-plot(log_x + k, log_y, pch = 16)
-abline(fit_reg, col = "red")
+# x = df_sf_hist_train %>% filter(freq!=0) %>% pull(freq)
+# fit_x = fitdist(x,"pareto",start=list(scale=1,shape=1))
+# k = fit$estimate[1]
+# a = fit$estimate[2]
+# log_x = log(x ~ k)
+# log_y = log(a) - a * log_x
+# fit_reg = lm(log_y~log_x)
+# plot(x, a*k^a / x^(a+1), type = "l", lwd = 2, col = "blue")
+# lines(x, dpareto(x, scale = k, shape = a), type = "l", lwd = 2, col = "red")
+# plot(log_x + k, log_y, pch = 16)
+# abline(fit_reg, col = "red")
 ```
 
 
 ```{r}
-sf_counterfactual_model_ft = dislnorm$new(dat=df_sf_hist_train %>% 
-           filter(freq!= 0) %>% pull(freq))
-df_sf_hist$counterfactual_freq_ft = predict(sf_counterfactual_model_ft,df_sf_hist) %>% round(1)
+# sf_counterfactual_model_ft = dislnorm$new(dat=df_sf_hist_train %>%
+#            filter(freq!= 0) %>% pull(freq))
+# NlS
+sf_cf_mod_ft_1 = nls(freq~a*number_of_units^(-b),
+                              data=df_sf_hist, start = list(a = 1000, b = 0.5))
+df_sf_hist$counterfactual_freq_ft_1 = predict(sf_cf_mod_ft_1,df_sf_hist) %>% round(1)
+# FatTailsR
+
+# use regk0 to get nls object?
+
+# other options:
+# poweRlaw
+# fitdistrplus
+# sads
 ```
+
+
+```{r}
+
+```
+
+
+```{r}
+reg = regkienerLX(X=sf_unit_counts)
+```
+
+```{r}
+plot(reg$dfrXP)
+```
+
+```{r}
+emp_probs = reg$dfrEP %>% 
+  group_by(E) %>% 
+  summarize(p_cum=max(P) %>% round(2)) %>% 
+  mutate(n_total=nrow(reg$dfrXP),
+         p_cum_prev = lag(p_cum) %>% replace_na(0),
+         prop = p_cum-p_cum_prev,
+         n = prop*n_total
+         )
+#df_sf_hist$counterfactual_freq_ft_1
+emp_probs
+```
+
+
+
+```{r}
+
+```
+
+
+• regkienerLX, laplacegaussnorm.
+• fitkienerX.
+• paramkienerX, paramkienerX5, paramkienerX7
 
 ```{r}
 df_sf_hist %>% 
   filter(number_of_units>=3,number_of_units<=100) %>% 
   ggplot() +
   geom_bar(aes(x=number_of_units,y=freq),stat='identity') +
-  geom_line(aes(x=number_of_units,y=counterfactual_freq_nb),color='blue') +
-  geom_vline(xintercept=23.5,linetype='dashed',color='blue') +
-  geom_vline(xintercept=24.5,linetype='dashed',color='black') +
+  geom_line(aes(x=number_of_units,y=counterfactual_freq_ft_1),color='blue') +
+  #geom_vline(xintercept=23.5,linetype='dashed',color='blue') +
+  #geom_vline(xintercept=24.5,linetype='dashed',color='black') +
   scale_x_continuous(n.breaks=10) +
   labs(x = 'Number of Units per Building',
        y = 'Frequency',
@@ -1040,7 +1092,9 @@ hist(boot_diffs,main='Distribution of Bootstrapped Test Statistics',
 ### McCrary Test
 
 ```{r}
-library(rdd)
+DCdensity(runvar=df_sf %>% 
+  filter(date_built<"2016-06-01") %>% 
+    pull(number_of_units),cutpoint=25,ext.out=T)
 ```
 
 
