@@ -346,7 +346,7 @@ df_sf %>% nrow
 df_cl_sf_recent %>% 
   filter(number_of_units<=50,number_of_units>=4) %>% 
   ggplot(aes(x=number_of_units)) +
-  geom_histogram(bins=40,color='white')
+  geom_histogram(binwidth=1,color='white')
 ```
 
 ## Data Merging
@@ -784,7 +784,7 @@ df_sf %>%
   filter(number_of_units>=2,
          number_of_units<=50,date_built>="2016-06-01") %>% 
   ggplot(aes(x=number_of_units)) + 
-  geom_histogram(color='white',bins=45)
+  geom_histogram(color='white',binwidth=1)
 ```
 ```{r}
 min_units = 3
@@ -838,6 +838,7 @@ df_sf_hist %>%
 ### Interpolation Approach
 
 ```{r}
+df_sf_hist_train_interpol_0 = df_sf_hist
 df_sf_hist_train_interpol_2 = df_sf_hist %>% 
   filter(number_of_units<=sf_counterfactual_max|number_of_units>=sf_counterfactual_max*1.5)
 df_sf_hist_train_interpol_3 = df_sf_hist %>% 
@@ -845,6 +846,8 @@ df_sf_hist_train_interpol_3 = df_sf_hist %>%
 df_sf_hist_train_interpol_4 = df_sf_hist %>% 
   filter(number_of_units<=sf_counterfactual_max|number_of_units>=sf_counterfactual_max*3)
 
+sf_counterfactual_model_pow_interpol_0 = nls(freq~ a*number_of_units^(-b),
+              data=df_sf_hist_train_interpol_0, start = list(a = 1000, b = .5))
 sf_counterfactual_model_pow_interpol_2 = nls(freq~a*number_of_units^(-b),
                               data=df_sf_hist_train_interpol_2, start = list(a = 1000, b = 0.5))
 sf_counterfactual_model_pow_interpol_3 = nls(freq~a*number_of_units^(-b),
@@ -852,9 +855,15 @@ sf_counterfactual_model_pow_interpol_3 = nls(freq~a*number_of_units^(-b),
 sf_counterfactual_model_pow_interpol_4 = nls(freq~a*number_of_units^(-b),
                               data=df_sf_hist_train_interpol_4, start = list(a = 1000, b = 0.5))
 
+
+
+df_sf_hist$counterfactual_freq_pow_interpol_0 = predict(sf_counterfactual_model_pow_interpol_0,df_sf_hist) %>% round(1)
 df_sf_hist$counterfactual_freq_pow_interpol_2 = predict(sf_counterfactual_model_pow_interpol_2,df_sf_hist) %>% round(1)
 df_sf_hist$counterfactual_freq_pow_interpol_3 = predict(sf_counterfactual_model_pow_interpol_3,df_sf_hist) %>% round(1)
 df_sf_hist$counterfactual_freq_pow_interpol_4 = predict(sf_counterfactual_model_pow_interpol_4,df_sf_hist) %>% round(1)
+
+df_sf_hist$counterfactual_freq_pow_interpol_5 = map_vec(df_sf_hist$number_of_units,
+                                                        \(x){300*x^(-1.2)})
 
 df_sf_hist
 ```
@@ -864,7 +873,8 @@ df_sf_hist %>%
   filter(number_of_units>=3,number_of_units<=100) %>% 
   ggplot() +
   geom_bar(aes(x=number_of_units,y=freq),stat='identity') +
-  geom_line(aes(x=number_of_units,y=counterfactual_freq_pow_interpol_2),color='blue') +
+  geom_line(aes(x=number_of_units,y=counterfactual_freq_pow_interpol_0),color='blue') +
+  geom_line(aes(x=number_of_units,y=counterfactual_freq_pow_interpol_5),color='red') +
   geom_vline(xintercept=23.5,linetype='dashed',color='blue') +
   geom_vline(xintercept=24.5,linetype='dashed',color='black') +
   scale_x_continuous(n.breaks=10) +
@@ -884,16 +894,54 @@ df_sf_hist %>%
             sum(number_of_units*counterfactual_freq_pow_interpol_4))
 ```
 
+```{r}
+sf_counterfactual_model_pow_interpol_0
+```
+
+```{r}
+a = 1000
+b = 1.2
+x = 3:100
+y = map_vec(x,.f=\(x){a*x^(-b)})
+data.frame(x=x,y=y) %>% 
+ggplot(aes(x=x,y=y)) + 
+  geom_line()
+```
+
+
+
+
 ### Fat Tails
 
 ```{r}
-library(poweRlaw)
+data("moby")
 ```
 
 
 ```{r}
-sf_counterfactual_model_ft = plfit(freq_sqrt~number_of_units_sqrt,
-                              data=df_sf_hist_train)
+library(poweRlaw)
+library(fitdistrplus)
+library(sads)
+```
+
+```{r}
+x = df_sf_hist_train %>% filter(freq!=0) %>% pull(freq)
+fit_x = fitdist(x,"pareto",start=list(scale=1,shape=1))
+k = fit$estimate[1]
+a = fit$estimate[2]
+log_x = log(x ~ k)
+log_y = log(a) - a * log_x
+fit_reg = lm(log_y~log_x)
+plot(x, a*k^a / x^(a+1), type = "l", lwd = 2, col = "blue")
+lines(x, dpareto(x, scale = k, shape = a), type = "l", lwd = 2, col = "red")
+plot(log_x + k, log_y, pch = 16)
+abline(fit_reg, col = "red")
+```
+
+
+```{r}
+sf_counterfactual_model_ft = dislnorm$new(dat=df_sf_hist_train %>% 
+           filter(freq!= 0) %>% pull(freq))
 df_sf_hist$counterfactual_freq_ft = predict(sf_counterfactual_model_ft,df_sf_hist) %>% round(1)
 ```
 
@@ -911,12 +959,22 @@ df_sf_hist %>%
        title = 'Frequency of Apartment Building Unit Counts in SF, 6/2016-4/2023')
 ```
 
-
-
 ### Pre-IZ Assumption Check
- check to make sure no bunching before IZ start date
+
+check to make sure no bunching before IZ start date
+
+```{r}
+df_sf %>% 
+  filter(number_of_units>=3,
+         number_of_units<=50,date_built<"2016-06-01") %>% 
+  ggplot(aes(x=number_of_units)) + 
+  geom_histogram(color='white',binwidth=1) +
+  labs(x = 'Number of Units per Building',y='Number of Buildings',
+       title = 'San Francisco Residential Building Permits, 10/1977-6/2016')
+```
+
  
-### Inference
+### Bootstrapped Hypothesis Testing
 
 Residuals Plot
 ```{r}
@@ -979,8 +1037,13 @@ hist(boot_diffs,main='Distribution of Bootstrapped Test Statistics',
      xlab = 'Test Statistic')
 ```
 
+### McCrary Test
 
-bootstrap residuals resampling
+```{r}
+library(rdd)
+```
+
+
 
 ## Portland, OR
 
@@ -989,7 +1052,9 @@ df_analysis %>%
   filter(situs_city=='PORTLAND',situs_state=='OR',number_of_units>=3,
          number_of_units<=50) %>% 
   ggplot(aes(x=number_of_units)) + 
-  geom_histogram(color='white',binwidth=1)
+  geom_histogram(color='white',binwidth=1) +
+  labs(title = 'Portland Residential Building Permits: 2017-2023',
+       x = 'Number of Units per Building',y='Number of Buildings')
 ```
 # Moderation Analysis
 
