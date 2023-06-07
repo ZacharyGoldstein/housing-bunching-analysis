@@ -567,54 +567,53 @@ ggplot(df_units %>% filter(rel_units<=50,rel_units>=-50),
        title = 'Relative Unit Count Frequencies')
 ```
 
+### Inference
+
+#### McCrary Test
+
+```{r}
+DCdensity(runvar=df_units %>% pull(rel_units),cutpoint=0,ext.out=T)
+```
+
 ### Group by Threshold
 
 ```{r}
-ggplot(df_units %>% filter(number_of_units<=100,threshold_num<=9),
-       aes(x=rel_units)) +
-  geom_histogram(binwidth=2,color='white')
+df_units = df_units %>% 
+  mutate(threshold_group = case_when(threshold_num<=9~"A 5-9",
+                                     threshold_num<=14~"B 10-14",
+                                     threshold_num<=19~"C 15-19",
+                                     threshold_num<=24~"D 20-24",
+                                     threshold_num<=29~"E 25-29",
+                                     threshold_num==30~"F 30",
+                                     threshold_num==50~"G 50",
+                                     threshold_num==100~"H 100"))
+df_units %>% count(threshold_group)
 ```
 
-```{r}
-ggplot(df_units %>% filter(number_of_units<=100,threshold_num>=10,threshold_num<=14),
-       aes(x=rel_units)) +
-  geom_histogram(binwidth=2,color='white')
-```
+#### Plots
 
 ```{r}
-ggplot(df_units %>% filter(number_of_units<=100,threshold_num>=15,threshold_num<=19),
-       aes(x=rel_units)) +
-  geom_histogram(binwidth=2,color='white')
+df_units %>% 
+  filter(rel_units<=50,rel_units>=-50) %>% 
+  ggplot(aes(x=rel_units)) +
+  geom_histogram(binwidth=1) +
+  facet_wrap(~threshold_group,scales='free')
 ```
 
-```{r}
-ggplot(df_units %>% filter(number_of_units<=100,threshold_num>=20,threshold_num<=24),
-       aes(x=rel_units)) +
-  geom_histogram(binwidth=2,color='white')
-```
+#### Inference
 
 ```{r}
-ggplot(df_units %>% filter(number_of_units<=100,threshold_num>=25,threshold_num<=29),
-       aes(x=rel_units)) +
-  geom_histogram(binwidth=2,color='white')
+for (group in df_units$threshold_group %>% unique %>% sort){
+  df_group = df_units %>% filter(threshold_group==group)
+  if (group %in% c("A 5-9","C 15-19","D 20-24","H 100")){next}
+  p = DCdensity(runvar=df_group %>% pull(rel_units),cutpoint=0,ext.out=F) %>% 
+    round(5)
+  #p = results$p
+  print(c(group,p))
+}
 ```
 
-```{r}
-ggplot(df_units %>% filter(number_of_units<=100,threshold_num==30),
-       aes(x=rel_units)) +
-  geom_histogram(binwidth=2,color='white')
-```
-```{r}
-ggplot(df_units %>% filter(number_of_units<=100,threshold_num==50),
-       aes(x=rel_units)) +
-  geom_histogram(binwidth=2,color='white')
-```
 
-```{r}
-ggplot(df_units %>% filter(threshold_num==100),
-       aes(x=rel_units)) +
-  geom_histogram(color='white')
-```
 ### Group by City
 
 ```{r}
@@ -685,14 +684,6 @@ ggplot(data_filtered,
 single_eda_plot(jurisdiction="FAIRFAX",state="VA")
 ```
 
-
-### Inference
-
-#### McCrary Test
-
-```{r}
-DCdensity(runvar=df_units %>% pull(rel_units),cutpoint=0,ext.out=T)
-```
 
 
 
