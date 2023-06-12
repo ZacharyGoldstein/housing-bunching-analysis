@@ -907,11 +907,6 @@ ggplot(aes(x=x,y=y)) +
 ### Fat Tails
 
 ```{r}
-#data("moby")
-```
-
-
-```{r}
 library(poweRlaw)
 library(fitdistrplus)
 library(sads)
@@ -937,36 +932,74 @@ library(FatTailsR)
 # sf_counterfactual_model_ft = dislnorm$new(dat=df_sf_hist_train %>%
 #            filter(freq!= 0) %>% pull(freq))
 # NlS
+# cf = counterfactual, ft = fat tails
 sf_cf_mod_ft_1 = nls(freq~a*number_of_units^(-b),
-                              data=df_sf_hist, start = list(a = 1000, b = 0.5))
+                              data=df_sf_hist_train_interpol_0, start = list(a = 1000, b = 0.5))
 df_sf_hist$counterfactual_freq_ft_1 = predict(sf_cf_mod_ft_1,df_sf_hist) %>% round(1)
 # FatTailsR
+sf_cf_mod_ft_2_reg = regkienerLX(X=sf_unit_counts)
+#sf_cf_mod_ft_2 = sf_cf_mod_ft_2_reg$regk0
 
 # use regk0 to get nls object?
+#df_sf_hist$counterfactual_freq_ft_2 = predict(sf_cf_mod_ft_2) %>% round(1)
 
 # other options:
-# poweRlaw
-# fitdistrplus
-# sads
+
+```
+#### FatTailsR
+
+```{r}
+sf_cf_mod_ft_2_reg = regkienerLX(X=sf_unit_counts)
 ```
 
 
 ```{r}
+plot(sf_cf_mod_ft_2_reg$dfrXP)
+```
 
+```{r}
+plot(sf_cf_mod_ft_2_reg$dfrEP)
+```
+
+```{r}
+plot(sf_cf_mod_ft_2_reg$dfrED)
+
+```
+
+```{r}
+sf_cf_mod_ft_k1 = regkienerLX(X=sf_unit_counts,model="K1")
+plot(sf_cf_mod_ft_k1$dfrXP)
+plot(sf_cf_mod_ft_k1$dfrEP)
+plot(sf_cf_mod_ft_k1$dfrED)
+```
+
+```{r}
+sf_cf_mod_ft_k2 = regkienerLX(X=sf_unit_counts,model="K2")
+plot(sf_cf_mod_ft_k2$dfrXP)
+plot(sf_cf_mod_ft_k2$dfrEP)
+plot(sf_cf_mod_ft_k2$dfrED)
+```
+
+```{r}
+sf_cf_mod_ft_k3 = regkienerLX(X=sf_unit_counts,model="K3")
+plot(sf_cf_mod_ft_k3$dfrXP)
+plot(sf_cf_mod_ft_k3$dfrEP)
+plot(sf_cf_mod_ft_k3$dfrED)
+```
+
+```{r}
+sf_cf_mod_ft_k4 = regkienerLX(X=sf_unit_counts,model="K4")
+plot(sf_cf_mod_ft_k4$dfrXP)
+plot(sf_cf_mod_ft_k4$dfrEP)
+plot(sf_cf_mod_ft_k4$dfrED)
 ```
 
 
 ```{r}
-reg = regkienerLX(X=sf_unit_counts)
-```
-
-```{r}
-plot(reg$dfrXP)
-```
-
-```{r}
-emp_probs = reg$dfrEP %>% 
-  group_by(E) %>% 
+est_probs = reg$dfrEP %>%
+  rowwise %>% 
+  mutate(quantile_rounded=max(round(E),min(sf_unit_counts))) %>% 
+  group_by(quantile_rounded) %>% 
   summarize(p_cum=max(P) %>% round(2)) %>% 
   mutate(n_total=nrow(reg$dfrXP),
          p_cum_prev = lag(p_cum) %>% replace_na(0),
@@ -974,19 +1007,35 @@ emp_probs = reg$dfrEP %>%
          n = prop*n_total
          )
 #df_sf_hist$counterfactual_freq_ft_1
-emp_probs
+est_probs
 ```
-
-
 
 ```{r}
-
+est_dens = reg$dfrED %>% 
+   mutate(n_total=nrow(reg$dfrED),
+         #p_cum_prev = lag(p_cum) %>% replace_na(0),
+         #prop = p_cum-p_cum_prev,
+         #n = prop*n_total
+         )
+#df_sf_hist$counterfactual_freq_ft_1
+est_dens
 ```
+
+
+
+
 
 
 • regkienerLX, laplacegaussnorm.
 • fitkienerX.
 • paramkienerX, paramkienerX5, paramkienerX7
+
+ model K1, K2, K3, K4
+
+#### poweRlaw
+#### fitdistrplus
+#### sads
+
 
 ```{r}
 df_sf_hist %>% 
