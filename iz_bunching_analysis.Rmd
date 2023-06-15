@@ -11,11 +11,16 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ```{r}
 rm(list=ls())
-library(tidyverse)
 library(readxl)
 library(usdata)
 library(magrittr)
 library(rdd)
+library(kableExtra)
+library(poweRlaw)
+library(fitdistrplus)
+library(sads)
+library(FatTailsR)
+library(tidyverse)
 options(dplyr.summarise.inform = FALSE)
 ```
 
@@ -534,6 +539,30 @@ df_analysis %>%
   arrange(desc(n)) %>% 
   head(10)
 ```
+## Units Table
+```{r}
+df_units %>% select(government_name,situs_state) %>% n_distinct
+```
+
+```{r}
+df_units %>% nrow
+```
+
+```{r}
+df_units %>% count(situs_state) %>% arrange(desc(n)) %>% mutate(pct=round(100*n/nrow(df_units))) %>% head()
+```
+
+```{r}
+df_units %>% distinct(government_name,situs_state) %>% count(situs_state) %>% arrange(desc(n)) %>% 
+  mutate(pct=round(100*n/n_distinct(df_units %>% 
+       select(government_name,situs_state)))) %>% head()
+```
+
+```{r}
+df_units %>% count(situs_city,situs_state) %>% arrange(desc(n)) %>% 
+  mutate(pct=round(100*n/nrow(df_units),1)) %>% 
+  head()
+```
 
 
 # National Analysis
@@ -546,7 +575,19 @@ df_units %>% count(threshold_num) %>%
   geom_bar(stat='identity') +
   labs(x = 'Unit Threshold',
        y = 'Buildings in Dataset',
-       title = 'Distribution of Unit Thresholds')
+       title = 'Distribution of Unit Thresholds by Building')
+```
+
+```{r}
+df_units %>% 
+  select(government_name,situs_state,threshold_num) %>% 
+  distinct %>% 
+  count(threshold_num) %>% 
+  ggplot(aes(x=threshold_num,y=n)) +
+  geom_bar(stat='identity') +
+  labs(x = 'Unit Threshold',
+       y = 'Programs in Dataset',
+       title = 'Distribution of Unit Thresholds by Program')
 ```
 
 
@@ -629,7 +670,7 @@ df_unit_bunch = df_units %>%
          two_below_ind = as.numeric(units_below_thresh==2)
          ) %>% 
   filter(threshold_num>=6)
-df_unit_bunch %>% 
+bunching_cities_table = df_unit_bunch %>% 
   filter(government_type %in% c("Town or city","Special district")) %>% 
   group_by(situs_city,situs_state,government_type,threshold_num) %>% 
   summarize(n_bunch=sum(bunch_ind),
@@ -645,10 +686,11 @@ df_unit_bunch %>%
   filter(n_one_below>n_post_bunch|n_two_below>n_post_bunch) %>% 
   select(-n_one_below,-n_two_below) %>% 
   head(10)
+
 ```
 
 ```{r}
-df_unit_bunch %>% 
+bunching_counties_table = df_unit_bunch %>% 
   filter(government_type %in% c("County","Consolidated city-county")) %>% 
   group_by(situs_county,situs_state,government_type,threshold_num) %>% 
   summarize(n_bunch=sum(bunch_ind),
@@ -664,6 +706,26 @@ df_unit_bunch %>%
   filter(n_one_below>n_post_bunch|n_two_below>n_post_bunch) %>% 
   select(-n_one_below,-n_two_below) %>% 
   head(10)
+```
+
+```{r}
+bunching_cities_table %>% 
+  rbind(bunching_counties_table) %>% 
+  ungroup %>% 
+  arrange(desc(n_diff)) %>% 
+  mutate(`City/County`=coalesce(situs_city,situs_county)) %>% 
+  relocate(`City/County`,.before = situs_state) %>% 
+  rename(State=situs_state,`Unit Threshold`=threshold_num,
+         `Government Type` = government_type,
+         `N Bunch`=n_bunch,`N Pre-Bunch`=n_pre_bunch,`N Post-Bunch`=n_post_bunch,
+         `Total Buildings`=n_total,`Bunch Minus Pre-Bunch`=n_diff) %>% 
+  select(-c("situs_city","situs_county")) %>% 
+  head(10) %>% 
+  kable %>% 
+  kable_styling(bootstrap_options = c("striped", "hover"),
+                full_width = F,
+                font_size = 12,
+                position = "left")
 ```
 
 
@@ -907,10 +969,7 @@ ggplot(aes(x=x,y=y)) +
 ### Fat Tails
 
 ```{r}
-library(poweRlaw)
-library(fitdistrplus)
-library(sads)
-library(FatTailsR)
+
 ```
 
 ```{r}
@@ -1034,6 +1093,37 @@ est_dens
 
 #### poweRlaw
 #### fitdistrplus
+
+##### Lognormal
+
+```{r}
+f1 <- fitdist(sf_unit_counts, "lnorm", method="mle") 
+f2 <- fitdist(sf_unit_counts, "lnorm", method="mme")
+par(mfrow=1:2)
+cdfcomp(list(f1, f2), do.points=FALSE, xlogscale = TRUE, main = "CDF plot")
+denscomp(list(f1, f2), demp=TRUE, main = "Density plot")
+```
+##### Pareto
+
+Figure out reasonable starting values for Pareto model
+
+```{r}
+plotdist(distr = "pareto",para = list(shape=1,scale=5),
+         data = sf_unit_counts)
+```
+
+
+```{r}
+f3 <- fitdist(sf_unit_counts, "pareto",method="mle",
+              start=list(shape=1,scale=5))
+f4 <- fitdist(sf_unit_counts, "pareto", method="mme",
+              start=list(shape=1,scale=5),order=1:2)
+par(mfrow=1:2)
+cdfcomp(list(f3, f4), do.points=FALSE, xlogscale = TRUE, main = "CDF plot")
+denscomp(list(f3, f4), demp=TRUE, main = "Density plot")
+```
+
+
 #### sads
 
 
