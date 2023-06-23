@@ -21,6 +21,7 @@ library(fitdistrplus)
 library(sads)
 library(FatTailsR)
 library(tidyverse)
+select = dplyr::select
 options(dplyr.summarise.inform = FALSE)
 ```
 
@@ -608,6 +609,22 @@ ggplot(df_units %>% filter(rel_units<=50,rel_units>=-50),
        title = 'Relative Unit Count Frequencies')
 ```
 
+```{r}
+df_units %<>% 
+  mutate(threshold_group = case_when(threshold_num<=9~"A 5-9",
+                                     threshold_num<=19~"B 10-19",
+                                     threshold_num<=29~"C 20-29",
+                                     TRUE~"D 30+"))
+ggplot(df_units %>% filter(rel_units<=50,rel_units>=-50),
+       aes(x=rel_units,fill=as.factor(threshold_group))) +
+  geom_histogram(binwidth=1,color='white') + 
+  labs(x = 'Units Relative to Threshold',
+       y = 'Frequency',
+       title = 'Relative Unit Count Frequencies by Threshold',
+       fill = "Threshold")
+```
+
+
 ### Inference
 
 #### McCrary Test
@@ -615,19 +632,22 @@ ggplot(df_units %>% filter(rel_units<=50,rel_units>=-50),
 ```{r}
 DCdensity(runvar=df_units %>% pull(rel_units),cutpoint=0,ext.out=T)
 ```
+Placebo checks
+```{r}
+for (x in c(-7,-5,-3,-1,1,3,5,7)){
+  print(x)
+  p = DCdensity(runvar=df_units %>% pull(rel_units),cutpoint=x,ext.out=F,
+                  plot=F)
+  print(p)
+  print("----------------")
+  }
+
+```
+
 
 ### Group by Threshold
 
 ```{r}
-df_units = df_units %>% 
-  mutate(threshold_group = case_when(threshold_num<=9~"A 5-9",
-                                     threshold_num<=14~"B 10-14",
-                                     threshold_num<=19~"C 15-19",
-                                     threshold_num<=24~"D 20-24",
-                                     threshold_num<=29~"E 25-29",
-                                     threshold_num==30~"F 30",
-                                     threshold_num==50~"G 50",
-                                     threshold_num==100~"H 100"))
 df_units %>% count(threshold_group)
 ```
 
@@ -638,19 +658,64 @@ df_units %>%
   filter(rel_units<=50,rel_units>=-50) %>% 
   ggplot(aes(x=rel_units)) +
   geom_histogram(binwidth=1) +
-  facet_wrap(~threshold_group,scales='free')
+  facet_wrap(~threshold_group,scales='free') +
+  labs(y = 'Frequency', x = 'Relative Units',
+       title = 'Relative Unit Count Distributions by Threshold')
 ```
 
 #### Inference
 
 ```{r}
+thresh_group_mcrary_results = data.frame(matrix(nrow=1,ncol=6))
+names(thresh_group_mcrary_results) = c("group","binsize","theta","se","p","z")
 for (group in df_units$threshold_group %>% unique %>% sort){
   df_group = df_units %>% filter(threshold_group==group)
-  if (group %in% c("A 5-9","C 15-19","D 20-24","H 100")){next}
-  p = DCdensity(runvar=df_group %>% pull(rel_units),cutpoint=0,ext.out=F) %>% 
-    round(5)
-  #p = results$p
-  print(c(group,p))
+  n_buildings = df_group %>% nrow
+  n_programs = df_units %>% select(government_name,situs_state) %>% n_distinct
+  # Adjust binsize/bw to make it work and avoid errors
+  if (group %in% c("A 5-9")){
+      results = DCdensity(runvar=df_group %>% pull(rel_units),cutpoint=0,ext.out=T,
+                      bin=.9,plot=T)
+  }
+  else{
+    results = DCdensity(runvar=df_group %>% pull(rel_units),
+                        cutpoint=0,ext.out=T,plot=T)
+  }
+  p = results$p %>% round(5)
+  z = results$z %>% round(3)
+  se = results$se %>% round(3)
+  binsize = results$binsize %>% round(3)
+  theta = results$theta %>% round(3)
+  results_vec = c(group,binsize,theta,se,p,z)
+  thresh_group_mcrary_results = rbind(thresh_group_mcrary_results,results_vec) 
+    
+}
+thresh_group_mcrary_results = thresh_group_mcrary_results %>% drop_na()
+thresh_group_mcrary_results
+```
+
+
+#### Placebo Test
+
+```{r}
+for (group in df_units$threshold_group %>% unique %>% sort){
+  df_group = df_units %>% filter(threshold_group==group)
+  n_buildings = df_group %>% nrow
+  n_programs = df_units %>% select(government_name,situs_state) %>% n_distinct
+  # Adjust binsize/bw to make it work and avoid errors
+  if (group %in% c("A 5-9")){
+      results = DCdensity(runvar=df_group %>% pull(rel_units),cutpoint=0,ext.out=T,
+                      bin=.9,plot=T)
+  }
+  else{
+    results = DCdensity(runvar=df_group %>% pull(rel_units),
+                        cutpoint=0,ext.out=T,plot=T)
+  }
+  p = results$p %>% round(5)
+  z = results$z %>% round(5)
+  binsize = results$binsize
+  theta = results$theta
+  print(c(group,p,z,binsize,theta))
 }
 ```
 
@@ -1055,29 +1120,29 @@ plot(sf_cf_mod_ft_k4$dfrED)
 
 
 ```{r}
-est_probs = reg$dfrEP %>%
-  rowwise %>% 
-  mutate(quantile_rounded=max(round(E),min(sf_unit_counts))) %>% 
-  group_by(quantile_rounded) %>% 
-  summarize(p_cum=max(P) %>% round(2)) %>% 
-  mutate(n_total=nrow(reg$dfrXP),
-         p_cum_prev = lag(p_cum) %>% replace_na(0),
-         prop = p_cum-p_cum_prev,
-         n = prop*n_total
-         )
-#df_sf_hist$counterfactual_freq_ft_1
-est_probs
+# est_probs = reg$dfrEP %>%
+#   rowwise %>% 
+#   mutate(quantile_rounded=max(round(E),min(sf_unit_counts))) %>% 
+#   group_by(quantile_rounded) %>% 
+#   summarize(p_cum=max(P) %>% round(2)) %>% 
+#   mutate(n_total=nrow(reg$dfrXP),
+#          p_cum_prev = lag(p_cum) %>% replace_na(0),
+#          prop = p_cum-p_cum_prev,
+#          n = prop*n_total
+#          )
+# #df_sf_hist$counterfactual_freq_ft_1
+# est_probs
 ```
 
 ```{r}
-est_dens = reg$dfrED %>% 
-   mutate(n_total=nrow(reg$dfrED),
-         #p_cum_prev = lag(p_cum) %>% replace_na(0),
-         #prop = p_cum-p_cum_prev,
-         #n = prop*n_total
-         )
-#df_sf_hist$counterfactual_freq_ft_1
-est_dens
+# est_dens = reg$dfrED %>% 
+#    mutate(n_total=nrow(reg$dfrED),
+#          #p_cum_prev = lag(p_cum) %>% replace_na(0),
+#          #prop = p_cum-p_cum_prev,
+#          #n = prop*n_total
+#          )
+# #df_sf_hist$counterfactual_freq_ft_1
+# est_dens
 ```
 
 
@@ -1114,13 +1179,13 @@ plotdist(distr = "pareto",para = list(shape=1,scale=5),
 
 
 ```{r}
-f3 <- fitdist(sf_unit_counts, "pareto",method="mle",
-              start=list(shape=1,scale=5))
-f4 <- fitdist(sf_unit_counts, "pareto", method="mme",
-              start=list(shape=1,scale=5),order=1:2)
-par(mfrow=1:2)
-cdfcomp(list(f3, f4), do.points=FALSE, xlogscale = TRUE, main = "CDF plot")
-denscomp(list(f3, f4), demp=TRUE, main = "Density plot")
+# f3 <- fitdist(sf_unit_counts, "pareto",method="mle",
+#               start=list(shape=1,scale=5))
+# f4 <- fitdist(sf_unit_counts, "pareto", method="mme",
+#               start=list(shape=1,scale=5),order=1:2)
+# par(mfrow=1:2)
+# cdfcomp(list(f3, f4), do.points=FALSE, xlogscale = TRUE, main = "CDF plot")
+# denscomp(list(f3, f4), demp=TRUE, main = "Density plot")
 ```
 
 
@@ -1151,6 +1216,8 @@ df_sf %>%
          number_of_units<=50,date_built<"2016-06-01") %>% 
   ggplot(aes(x=number_of_units)) + 
   geom_histogram(color='white',binwidth=1) +
+  geom_vline(xintercept = 24.5,linetype='dashed') +
+  geom_vline(xintercept = 9.5,linetype='dashed') +
   labs(x = 'Number of Units per Building',y='Number of Buildings',
        title = 'San Francisco Residential Building Permits, 10/1977-6/2016')
 ```
@@ -1220,6 +1287,7 @@ hist(boot_diffs,main='Distribution of Bootstrapped Test Statistics',
 ```
 
 ### McCrary Test
+
 
 ```{r}
 DCdensity(runvar=df_sf %>% 
