@@ -666,12 +666,12 @@ df_units %>%
 #### Inference
 
 ```{r}
-thresh_group_mcrary_results = data.frame(matrix(nrow=1,ncol=6))
-names(thresh_group_mcrary_results) = c("group","binsize","theta","se","p","z")
+thresh_group_mcrary_results = data.frame(matrix(nrow=1,ncol=8))
+names(thresh_group_mcrary_results) = c("group","n_buildings","n_programs","binsize","theta","se","p","z")
 for (group in df_units$threshold_group %>% unique %>% sort){
   df_group = df_units %>% filter(threshold_group==group)
   n_buildings = df_group %>% nrow
-  n_programs = df_units %>% select(government_name,situs_state) %>% n_distinct
+  n_programs = df_group %>% select(government_name,situs_state) %>% n_distinct
   # Adjust binsize/bw to make it work and avoid errors
   if (group %in% c("A 5-9")){
       results = DCdensity(runvar=df_group %>% pull(rel_units),cutpoint=0,ext.out=T,
@@ -686,11 +686,11 @@ for (group in df_units$threshold_group %>% unique %>% sort){
   se = results$se %>% round(3)
   binsize = results$binsize %>% round(3)
   theta = results$theta %>% round(3)
-  results_vec = c(group,binsize,theta,se,p,z)
+  results_vec = c(group,n_buildings,n_programs,binsize,theta,se,p,z)
   thresh_group_mcrary_results = rbind(thresh_group_mcrary_results,results_vec) 
     
 }
-thresh_group_mcrary_results = thresh_group_mcrary_results %>% drop_na()
+thresh_group_mcrary_results = thresh_group_mcrary_results %>% drop_na(group)
 thresh_group_mcrary_results
 ```
 
@@ -698,25 +698,54 @@ thresh_group_mcrary_results
 #### Placebo Test
 
 ```{r}
+thresh_group_mcrary_placebo_results = data.frame(matrix(nrow=1,ncol=4))
+names(thresh_group_mcrary_placebo_results) = c("group","cutpoint","binsize","theta")
 for (group in df_units$threshold_group %>% unique %>% sort){
+  print("-------------------------")
+  print("GROUP")
+  print(group)
   df_group = df_units %>% filter(threshold_group==group)
-  n_buildings = df_group %>% nrow
-  n_programs = df_units %>% select(government_name,situs_state) %>% n_distinct
-  # Adjust binsize/bw to make it work and avoid errors
-  if (group %in% c("A 5-9")){
-      results = DCdensity(runvar=df_group %>% pull(rel_units),cutpoint=0,ext.out=T,
-                      bin=.9,plot=T)
-  }
-  else{
-    results = DCdensity(runvar=df_group %>% pull(rel_units),
-                        cutpoint=0,ext.out=T,plot=T)
-  }
-  p = results$p %>% round(5)
-  z = results$z %>% round(5)
-  binsize = results$binsize
-  theta = results$theta
-  print(c(group,p,z,binsize,theta))
-}
+  min_x = df_group %>% arrange(rel_units) %>% tail(nrow(df_group)-20) %>% pull(rel_units) %>% min
+  max_x = df_group %>% arrange(rel_units) %>% head(nrow(df_group)-20) %>% pull(rel_units) %>% max
+  max_x = min(max_x,100)
+  cutpoints = seq.int(from=min_x+1,to=max_x-1,by=1)
+  for (cut_x in cutpoints){
+    #print("---")
+    #print("CUTPOINT")
+    #print(cut_x)
+    binsize = 2*sd(df_group$rel_units)*length(df_group$rel_units)^(-.5)
+    while (binsize > 0){
+    tryCatch({
+      #print("Binsize")
+      #print(binsize)
+      results = DCdensity(runvar=df_group %>% pull(rel_units),cutpoint=cut_x,
+                            ext.out=T,plot=F,bin = binsize)
+      theta = results$theta %>% round(3)
+      results_vec = c(group,cut_x,binsize %>% round(3),theta)
+      thresh_group_mcrary_placebo_results = rbind(thresh_group_mcrary_placebo_results,results_vec)
+      break}
+      , 
+    warning = function(w) {
+    #print(w)
+    binsize <<- binsize-.25
+
+  }, error = function(e) {
+      #print(e)
+      binsize <<- binsize-.25
+  }, finally = {
+      #print("c")
+  })
+      }
+  if (binsize<=0){
+    print("FAIL")
+    print(group)
+    print(cut_x)
+    print(binsize)
+    print("------")
+  }    
+    }}
+thresh_group_mcrary_placebo_results = thresh_group_mcrary_placebo_results %>% drop_na(group)
+thresh_group_mcrary_placebo_results
 ```
 
 
