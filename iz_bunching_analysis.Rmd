@@ -690,7 +690,8 @@ for (group in df_units$threshold_group %>% unique %>% sort){
   thresh_group_mcrary_results = rbind(thresh_group_mcrary_results,results_vec) 
     
 }
-thresh_group_mcrary_results = thresh_group_mcrary_results %>% drop_na(group)
+thresh_group_mcrary_results = thresh_group_mcrary_results %>% drop_na(group) %>% 
+  mutate(across(-group,as.numeric))
 thresh_group_mcrary_results
 ```
 
@@ -744,8 +745,28 @@ for (group in df_units$threshold_group %>% unique %>% sort){
     print("------")
   }    
     }}
-thresh_group_mcrary_placebo_results = thresh_group_mcrary_placebo_results %>% drop_na(group)
+thresh_group_mcrary_placebo_results = thresh_group_mcrary_placebo_results %>% drop_na(group) %>% 
+  mutate(across(-group,as.numeric))
 thresh_group_mcrary_placebo_results
+```
+
+```{r}
+for (group_i in thresh_group_mcrary_placebo_results$group %>% unique %>% sort){
+  df_group = thresh_group_mcrary_placebo_results %>% filter(group==group_i) %>% 
+    mutate(abs_theta=abs(theta))
+  theta_obs = thresh_group_mcrary_results %>% filter(group==group_i) %>% 
+    first %>% pull(theta) %>% abs
+  plot = df_group %>% 
+    ggplot(aes(x=theta)) +
+    geom_histogram() +
+    geom_vline(xintercept=theta_obs) +
+    labs(title = str_glue("Placebo Theta Distribution: {group_i}"),
+         x = "Theta",y = "Frequency")
+  p = nrow(df_group %>% filter(abs_theta>theta_obs)) / nrow(df_group)
+  print(p)
+  print(plot)
+  
+}
 ```
 
 
