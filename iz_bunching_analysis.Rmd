@@ -692,7 +692,12 @@ for (group in df_units$threshold_group %>% unique %>% sort){
 }
 thresh_group_mcrary_results = thresh_group_mcrary_results %>% drop_na(group) %>% 
   mutate(across(-group,as.numeric))
-thresh_group_mcrary_results
+thresh_group_mcrary_results %>% 
+  kable %>% 
+  kable_styling(bootstrap_options = c("striped", "hover"),
+                full_width = F,
+                font_size = 12,
+                position = "left")
 ```
 
 
@@ -751,22 +756,40 @@ thresh_group_mcrary_placebo_results
 ```
 
 ```{r}
+placebo_check_p_values = data.frame(matrix(nrow=1,ncol=3))
+i = 0
 for (group_i in thresh_group_mcrary_placebo_results$group %>% unique %>% sort){
+  i = i+1
   df_group = thresh_group_mcrary_placebo_results %>% filter(group==group_i) %>% 
     mutate(abs_theta=abs(theta))
   theta_obs = thresh_group_mcrary_results %>% filter(group==group_i) %>% 
-    first %>% pull(theta) %>% abs
+    first %>% pull(theta)
   plot = df_group %>% 
     ggplot(aes(x=theta)) +
-    geom_histogram() +
-    geom_vline(xintercept=theta_obs) +
+    geom_histogram(color='white',fill='black') +
+    geom_vline(xintercept=theta_obs,linetype='dashed',color='blue',size=1.5) +
     labs(title = str_glue("Placebo Theta Distribution: {group_i}"),
          x = "Theta",y = "Frequency")
-  p = nrow(df_group %>% filter(abs_theta>theta_obs)) / nrow(df_group)
+  p = nrow(df_group %>% filter(abs_theta>abs(theta_obs))) / nrow(df_group)
+  p_one_sided = nrow(df_group %>% filter(theta<theta_obs)) / nrow(df_group)
+  placebo_check_p_values %<>% rbind(c(group_i,p,p_one_sided))
   print(p)
   print(plot)
-  
 }
+```
+```{r}
+df_placebo = as.data.frame(placebo_check_p_values)
+names(df_placebo) = c("Threshold Range","p (two-tailed)","p (one-tailed)")
+#df_placebo[,'Threshold Range'] = names(placebo_check_p_values)
+df_placebo %>% 
+  drop_na() %>% 
+  mutate(across(contains("p "),as.numeric)) %>% 
+  mutate(across(where(is.numeric),round,5)) %>% 
+  kable %>% 
+  kable_styling(bootstrap_options = c("striped", "hover"),
+                full_width = F,
+                font_size = 12,
+                position = "left")
 ```
 
 
@@ -1246,14 +1269,14 @@ plotdist(distr = "pareto",para = list(shape=1,scale=5),
 df_sf_hist %>% 
   filter(number_of_units>=3,number_of_units<=100) %>% 
   ggplot() +
-  geom_bar(aes(x=number_of_units,y=freq),stat='identity') +
+  geom_bar(aes(x=number_of_units,y=freq),stat='identity',color='white') +
   geom_line(aes(x=number_of_units,y=counterfactual_freq_ft_1),color='blue') +
   #geom_vline(xintercept=23.5,linetype='dashed',color='blue') +
   #geom_vline(xintercept=24.5,linetype='dashed',color='black') +
   scale_x_continuous(n.breaks=10) +
   labs(x = 'Number of Units per Building',
-       y = 'Frequency',
-       title = 'Frequency of Apartment Building Unit Counts in SF, 6/2016-4/2023')
+       y = 'Number of Buildings',
+       title = 'Distribution of Apartment Building Unit Counts in SF, 6/2016-4/2023')
 ```
 
 ### Pre-IZ Assumption Check
@@ -1263,13 +1286,13 @@ check to make sure no bunching before IZ start date
 ```{r}
 df_sf %>% 
   filter(number_of_units>=3,
-         number_of_units<=50,date_built<"2016-06-01") %>% 
+         number_of_units<=100,date_built<"2016-06-01") %>% 
   ggplot(aes(x=number_of_units)) + 
   geom_histogram(color='white',binwidth=1) +
   geom_vline(xintercept = 24.5,linetype='dashed') +
   geom_vline(xintercept = 9.5,linetype='dashed') +
   labs(x = 'Number of Units per Building',y='Number of Buildings',
-       title = 'San Francisco Residential Building Permits, 10/1977-6/2016')
+       title = 'Distribution of Apartment Building Unit Counts in SF, 10/1977-6/2016')
 ```
 
  
@@ -1332,9 +1355,17 @@ p_val
 ```
 
 ```{r}
-hist(boot_diffs,main='Distribution of Bootstrapped Test Statistics',
-     xlab = 'Test Statistic')
+as.data.frame(boot_diffs) %>% 
+  ggplot() +
+  geom_histogram(aes(x=boot_diffs),color='white') +
+  geom_vline(xintercept = 9,linetype='dashed') +
+  annotate("text",label=str_glue("p = {p_val}"),x=11,y=20) +
+  labs(title='Distribution of Bootstrapped Test Statistics: SF Bunching Test',
+     x = 'Test Statistic',y='Frequency')
 ```
+
+
+
 
 ### McCrary Test
 
@@ -1344,8 +1375,6 @@ DCdensity(runvar=df_sf %>%
   filter(date_built<"2016-06-01") %>% 
     pull(number_of_units),cutpoint=25,ext.out=T)
 ```
-
-
 
 ## Portland, OR
 
