@@ -23,6 +23,7 @@ library(FatTailsR)
 library(tidyverse)
 select = dplyr::select
 options(dplyr.summarise.inform = FALSE)
+set.seed(1)
 ```
 
 # Loading Data
@@ -586,6 +587,7 @@ df_units %>%
   count(threshold_num) %>% 
   ggplot(aes(x=threshold_num,y=n)) +
   geom_bar(stat='identity') +
+  scale_x_continuous(breaks=c(seq(0,100,5))) +
   labs(x = 'Unit Threshold',
        y = 'Programs in Dataset',
        title = 'Distribution of Unit Thresholds by Program')
@@ -593,9 +595,9 @@ df_units %>%
 
 
 ```{r}
-ggplot(df_units %>% filter(number_of_units<=50,number_of_units>=3),
+ggplot(df_units %>% filter(number_of_units<=50,number_of_units>=2),
        aes(x=number_of_units)) +
-  geom_histogram(binwidth=1,color='white') +
+  geom_histogram(binwidth=2,color='white') +
   labs(x = 'Number of Units',y='Frequency',
        title = 'Distribution of Building Unit Counts')
 ```
@@ -1289,8 +1291,8 @@ df_sf %>%
          number_of_units<=100,date_built<"2016-06-01") %>% 
   ggplot(aes(x=number_of_units)) + 
   geom_histogram(color='white',binwidth=1) +
-  geom_vline(xintercept = 24.5,linetype='dashed') +
-  geom_vline(xintercept = 9.5,linetype='dashed') +
+  geom_vline(xintercept = 24.5,linetype='dashed',color='blue') +
+  geom_vline(xintercept = 9.5,linetype='dashed',color='blue') +
   labs(x = 'Number of Units per Building',y='Number of Buildings',
        title = 'Distribution of Apartment Building Unit Counts in SF, 10/1977-6/2016')
 ```
@@ -1315,23 +1317,43 @@ df_sf_hist %>%
 n_bootstraps = 500
 df_sf_boot = df_sf_hist %>% 
   mutate(residual=freq-counterfactual_freq_pow,
-         threshold_num = 25,
-          units_below_thresh=threshold_num-number_of_units,
-         bunch_ind = as.numeric((units_below_thresh==1)|
-           (units_below_thresh==2)&(threshold_num %% 2 == 0)),
-         pre_bunch_ind = as.numeric(
-           ((units_below_thresh %in% c(3,4))&(threshold_num %% 2 == 0))|
-           ((units_below_thresh %in% c(2,3))&(threshold_num %% 2 == 1))
-           )) 
+         threshold_num_1 = 10,
+          units_below_thresh_1=threshold_num_1-number_of_units,
+         bunch_ind_1 = as.numeric((units_below_thresh_1==1)|
+           (units_below_thresh_1==2)&(threshold_num_1 %% 2 == 0)),
+         pre_bunch_ind_1 = as.numeric(
+           ((units_below_thresh_1 %in% c(3,4))&(threshold_num_1 %% 2 == 0))|
+           ((units_below_thresh_1 %in% c(2,3))&(threshold_num_1 %% 2 == 1))
+           ),
+         
+         threshold_num_2 = 25,
+          units_below_thresh_2=threshold_num_2-number_of_units,
+         bunch_ind_2 = as.numeric((units_below_thresh_2==1)|
+           (units_below_thresh_2==2)&(threshold_num_2 %% 2 == 0)),
+         pre_bunch_ind_2 = as.numeric(
+           ((units_below_thresh_2 %in% c(3,4))&(threshold_num_2 %% 2 == 0))|
+           ((units_below_thresh_2 %in% c(2,3))&(threshold_num_2 %% 2 == 1))
+           ),
+         
+         
+         ) 
 
-n_pre_bunch_obs = df_sf_boot %>% filter(pre_bunch_ind==1) %>% pull(freq) %>% 
+n_pre_bunch_obs_2 = df_sf_boot %>% filter(pre_bunch_ind_2==1) %>% pull(freq) %>% 
     sum
-n_bunch_obs = df_sf_boot %>% filter(bunch_ind==1) %>% pull(freq) %>% 
+n_bunch_obs_2 = df_sf_boot %>% filter(bunch_ind_2==1) %>% pull(freq) %>% 
     sum
-n_diff_obs = n_bunch_obs-n_pre_bunch_obs
+n_diff_obs_2 = n_bunch_obs_2-n_pre_bunch_obs_2
+
+n_pre_bunch_obs_c = df_sf_boot %>% filter(pre_bunch_ind_2==1|pre_bunch_ind_1==1) %>% pull(freq) %>% 
+    sum
+n_bunch_obs_c = df_sf_boot %>% filter(bunch_ind_2==1|bunch_ind_1==1) %>% pull(freq) %>% 
+    sum
+n_diff_obs_c = n_bunch_obs_c-n_pre_bunch_obs_c
 
 nrows = nrow(df_sf_boot)
-boot_diffs = vector(length=n_bootstraps)
+boot_diffs_2 = vector(length=n_bootstraps)
+boot_diffs_c = vector(length=n_bootstraps)
+
 for (i in 1:n_bootstraps){
   df_sf_boot_i = df_sf_boot
   random_residuals_sample = sample(df_sf_boot_i$residual,
@@ -1339,31 +1361,54 @@ for (i in 1:n_bootstraps){
                                    replace = T)
   df_sf_boot_i$freq_boot = df_sf_boot_i$counterfactual_freq_pow+random_residuals_sample
   # calculate bunching statistic
-  n_pre_bunch_i = df_sf_boot_i %>% filter(pre_bunch_ind==1) %>% pull(freq_boot) %>% 
+  n_pre_bunch_i_2 = df_sf_boot_i %>% filter(pre_bunch_ind_2==1) %>% pull(freq_boot) %>% 
     sum
-  n_bunch_i = df_sf_boot_i %>% filter(bunch_ind==1) %>% pull(freq_boot) %>% 
+  n_bunch_i_2 = df_sf_boot_i %>% filter(bunch_ind_2==1) %>% pull(freq_boot) %>% 
     sum
-  n_diff_i = n_bunch_i-n_pre_bunch_i
-  boot_diffs[i] = n_diff_i
+  n_diff_i_2 = n_bunch_i_2-n_pre_bunch_i_2
+  boot_diffs_2[i] = n_diff_i_2
+  
+  n_pre_bunch_i_c = df_sf_boot_i %>% filter(pre_bunch_ind_2==1|pre_bunch_ind_1==1) %>% pull(freq_boot) %>% 
+    sum
+  n_bunch_i_c = df_sf_boot_i %>% filter(bunch_ind_2==1|bunch_ind_1==1) %>% pull(freq_boot) %>% 
+    sum
+  n_diff_i_c = n_bunch_i_c-n_pre_bunch_i_c
+  boot_diffs_c[i] = n_diff_i_c
 }
 ```
 
 ```{r}
-n_diff_obs
-p_val = length(boot_diffs[boot_diffs>n_diff_obs])/length(boot_diffs)
-p_val
+n_diff_obs_2
+p_val_2 = length(boot_diffs_2[boot_diffs_2>n_diff_obs_2])/length(boot_diffs_2)
+p_val_2
 ```
 
 ```{r}
-as.data.frame(boot_diffs) %>% 
+n_diff_obs_c
+p_val_c = length(boot_diffs_c[boot_diffs_c>n_diff_obs_c])/length(boot_diffs_c)
+p_val_c
+```
+
+
+```{r}
+as.data.frame(boot_diffs_2) %>% 
   ggplot() +
-  geom_histogram(aes(x=boot_diffs),color='white') +
+  geom_histogram(aes(x=boot_diffs_2),color='white') +
   geom_vline(xintercept = 9,linetype='dashed') +
-  annotate("text",label=str_glue("p = {p_val}"),x=11,y=20) +
+  annotate("text",label=str_glue("p = {p_val_2}"),x=11,y=20) +
   labs(title='Distribution of Bootstrapped Test Statistics: SF Bunching Test',
      x = 'Test Statistic',y='Frequency')
 ```
 
+```{r}
+as.data.frame(boot_diffs_c) %>% 
+  ggplot() +
+  geom_histogram(aes(x=boot_diffs_c),color='white') +
+  geom_vline(xintercept = 9,linetype='dashed') +
+  annotate("text",label=str_glue("p = {p_val_c}"),x=11,y=20) +
+  labs(title='Distribution of Bootstrapped Test Statistics: SF Bunching Test',
+     x = 'Test Statistic',y='Frequency')
+```
 
 
 
