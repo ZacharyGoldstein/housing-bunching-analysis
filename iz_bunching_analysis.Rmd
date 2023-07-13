@@ -52,6 +52,9 @@ df_iz = df_iz_raw %>%
         state=`Government Address: State`,
         `Year Program Adopted`,`Year Program Updated`,
          `Program Applicable Areas`,`Minimum Project Size`,`Minimum Set-aside`,
+        `Minimum Set-aside`,`Highest Income Served`,
+            `Lowest Income Served`,`(Rental) Single Income Requirement Detail`,
+            `(Rental) Multiple Tiers of Income Targeting Detail`,
          `Incentive`) %>% 
   rename_with(\(x){str_replace_all(x," ","_") %>% str_to_lower()}) %>% 
   # Only keep policies with known thresholds (3 units or less doesn't count)
@@ -63,8 +66,12 @@ df_iz = df_iz_raw %>%
     # Manual override policy details based on research
     # https://www.fbm.com/publications/what-you-need-to-know-about-san-franciscos-inclusionary-affordable-housing-program/
     minimum_project_size=ifelse(government_name=='San Francisco','25 units',minimum_project_size),
-    year_program_adopted=ifelse(government_name=='San Francisco','2016',year_program_adopted)
-    ) %>% 
+    year_program_adopted=ifelse(government_name=='San Francisco','2016',year_program_adopted),
+    lowest_income_served_clean = 
+           ifelse(str_detect(lowest_income_served,"% AMI"),
+                  str_sub(lowest_income_served,1,3) %>% 
+                    str_replace("%","") %>% 
+                    as.numeric,lowest_income_served)) %>% 
   filter(minimum_project_size!="missing") %>% 
   left_join(df_pops %>% select(City,state_code,city_pop=Population),
             by=c("government_name"="City","state"="state_code"))
@@ -447,14 +454,16 @@ df_merged %>% filter(str_detect(situs_county,"SAN MAT")) %>%
 ```{r}
 df_analysis = df_merged %>% 
   mutate(bldg_year_combined=coalesce(effective_year_built,year_built),
-         bldg_sq_ft_combined = coalesce(universal_building_square_feet,building_square_feet)) %>% 
+         bldg_sq_ft_combined = coalesce(universal_building_square_feet,building_square_feet),
+         cl = is.na(clip)==F) %>% 
   filter(is.na(bldg_year_combined)==F,is.na(threshold_cat)==F,number_of_buildings==1,
          # Either date of adoption unknown, or the building was built after IZ adoption
          (bldg_year_combined>=year_program_adopted|year_program_adopted=="Don't know")) %>% 
   select(situs_city,situs_county,situs_state,government_name,government_type,
         acres,land_square_footage,bldg_sq_ft_combined,
         bldg_year_combined,number_of_units,number_of_buildings,
-        threshold_cat,threshold_num,year_program_adopted,year_program_updated)
+        threshold_cat,threshold_num,year_program_adopted,year_program_updated,
+        cl,lowest_income_served_clean,minimum_set_aside=`minimum_set-aside`) ####
 df_analysis %>% 
   slice_sample(n=10)
 df_analysis %>% dim
@@ -564,6 +573,11 @@ df_units %>% distinct(government_name,situs_state) %>% count(situs_state) %>% ar
 df_units %>% count(situs_city,situs_state) %>% arrange(desc(n)) %>% 
   mutate(pct=round(100*n/nrow(df_units),1)) %>% 
   head()
+```
+
+```{r}
+# what percent is CL vs. supplemental databases?
+df_units %>% group_by(cl) %>% summarize(round(n()/nrow(df_units),4))
 ```
 
 
@@ -1394,7 +1408,7 @@ p_val_c
 as.data.frame(boot_diffs_2) %>% 
   ggplot() +
   geom_histogram(aes(x=boot_diffs_2),color='white') +
-  geom_vline(xintercept = 9,linetype='dashed') +
+  geom_vline(xintercept = n_diff_obs_2,linetype='dashed') +
   annotate("text",label=str_glue("p = {p_val_2}"),x=11,y=20) +
   labs(title='Distribution of Bootstrapped Test Statistics: SF Bunching Test',
      x = 'Test Statistic',y='Frequency')
@@ -1404,8 +1418,8 @@ as.data.frame(boot_diffs_2) %>%
 as.data.frame(boot_diffs_c) %>% 
   ggplot() +
   geom_histogram(aes(x=boot_diffs_c),color='white') +
-  geom_vline(xintercept = 9,linetype='dashed') +
-  annotate("text",label=str_glue("p = {p_val_c}"),x=11,y=20) +
+  geom_vline(xintercept = n_diff_obs_c,linetype='dashed') +
+  annotate("text",label=str_glue("p = {p_val_c}"),x=21,y=20) +
   labs(title='Distribution of Bootstrapped Test Statistics: SF Bunching Test',
      x = 'Test Statistic',y='Frequency')
 ```
@@ -1438,3 +1452,26 @@ df_analysis %>%
 - % of units required to be affordable
 - degree of affordability
 - other 
+
+```{r}
+df_iz %>% count(`minimum_set-aside`) %>% arrange(desc(n)) %>% head()
+```
+
+```{r}
+df_iz %>% count(`lowest_income_served`) %>% arrange(desc(n)) %>% head()
+```
+
+```{r}
+df_analysis %>%
+  filter(minimum_set_aside!="Don't know") %>%
+  mutate(minimum_set_aside_clean =
+           ifelse(str_detect(lowest_income_served,"% AMI"),
+                  str_sub(lowest_income_served,1,3) %>%
+                    str_replace("%","") %>%
+                    as.numeric,lowest_income_served)) %>%
+  count(minimum_set_aside_clean) %>%
+  arrange(desc(n))
+```
+
+
+
